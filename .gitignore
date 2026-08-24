@@ -25,3 +25,4 @@ pnpm-debug.log*
 *.mobileprovision
 *.orig.*
 web-build/
+.vercel

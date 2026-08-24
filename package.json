@@ -10,6 +10,11 @@
     "db:push": "pnpm --filter @perzent/database push",
     "db:seed": "pnpm --filter @perzent/database seed"
   },
+  "dependencies": {
+    "next": "15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "devDependencies": {
     "turbo": "^2.4.4",
     "typescript": "^5.7.3",
