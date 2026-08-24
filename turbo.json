@@ -1,5 +1,14 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "CASHFREE_APP_ID",
+    "CASHFREE_SECRET_KEY",
+    "CASHFREE_ENV",
+    "CASHFREE_API_VERSION",
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_EMPLOYEE_APP_URL",
+    "NEXT_PUBLIC_OWNER_ADMIN_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
