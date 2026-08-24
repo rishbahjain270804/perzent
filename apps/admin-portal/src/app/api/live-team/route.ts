@@ -1,71 +1,74 @@
 import { NextResponse } from 'next/server';
-import { getStore } from '@perzent/database';
-import { LiveTeamMember } from '@perzent/shared-types';
+import { prisma } from '@perzent/database';
+import { authErrorResponse, requireSession } from '@/lib/auth';
 
-export async function GET() {
-  const store = getStore();
-  const todayStr = new Date().toISOString().split('T')[0];
+export async function GET(request: Request) {
+  try {
+    const session = await requireSession(request, ['OWNER', 'MANAGER']);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
 
-  const liveMembers: LiveTeamMember[] = store.users
-    .filter((u) => u.role === 'EMPLOYEE')
-    .map((u) => {
-      const attendance = store.attendanceRecords.find((a) => a.user_id === u.id && a.work_date === todayStr);
-      const activeBreak = store.attendanceBreaks.find(
-        (b) => attendance && b.attendance_id === attendance.id && !b.end_time
-      );
-      const lastWaypoint = store.locationWaypoints
-        .filter((w) => w.user_id === u.id)
-        .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())[0];
-      const lastStop = store.locationStops
-        .filter((s) => s.user_id === u.id)
-        .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())[0];
-      const device = store.userDevices.find((d) => d.user_id === u.id);
-      const tamper = store.tamperLogs.find((t) => t.user_id === u.id);
-      const dept = store.departments.find((d) => d.id === u.department_id);
-
-      let shift_status: 'CHECKED_IN' | 'ON_BREAK' | 'CHECKED_OUT' | 'OFF_DUTY' = 'OFF_DUTY';
-      if (attendance) {
-        if (attendance.status === 'CHECKED_OUT' || attendance.status === 'AUTO_CHECKED_OUT') {
-          shift_status = 'CHECKED_OUT';
-        } else if (activeBreak || attendance.status === 'ON_BREAK') {
-          shift_status = 'ON_BREAK';
-        } else {
-          shift_status = 'CHECKED_IN';
-        }
-      }
-
-      const is_moving = lastWaypoint ? lastWaypoint.speed > 3 : false;
-      const dwell_minutes = lastStop ? Math.round(lastStop.dwell_duration_seconds / 60) : 0;
-
-      const batteryLevel = device?.telemetry?.battery_level ?? 85;
-
-      return {
-        user_id: u.id,
-        full_name: u.full_name,
-        designation: u.designation,
-        department_name: dept?.name || 'Field Hub',
-        shift_status,
-        current_location: lastWaypoint
-          ? {
-              latitude: lastWaypoint.latitude,
-              longitude: lastWaypoint.longitude,
-              accuracy: lastWaypoint.accuracy,
-              speed: lastWaypoint.speed,
-              heading: lastWaypoint.heading,
-              address_name: lastStop?.address_name || 'Sector 62, Noida',
-              last_ping_at: lastWaypoint.recorded_at,
-            }
-          : undefined,
-        is_moving,
-        dwell_minutes,
-        battery_level: batteryLevel,
-        telemetry: device?.telemetry,
-        device_model: device?.device_model || 'Unbound Android Device',
-        device_uuid: device?.device_uuid || 'DEV-PENDING',
-        gps_enabled: !tamper || tamper.event_type !== 'GPS_DISABLED',
-        has_tamper_alert: !!tamper,
-      };
+    const users = await prisma.user.findMany({
+      where: {
+        company_id: session.companyId,
+        role: 'EMPLOYEE',
+        status: 'ACTIVE',
+        ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
+      },
+      include: {
+        department: { select: { name: true } },
+        devices: { where: { is_active: true }, take: 1 },
+        attendances: {
+          where: { work_date: today },
+          take: 1,
+          include: {
+            breaks: { where: { end_time: null }, take: 1 },
+            waypoints: { orderBy: { recorded_at: 'desc' }, take: 1 },
+            stops: { orderBy: { end_time: 'desc' }, take: 1 },
+            tamper_logs: { orderBy: { occurred_at: 'desc' }, take: 1 },
+          },
+        },
+      },
+      orderBy: { full_name: 'asc' },
     });
 
-  return NextResponse.json(liveMembers);
+    return NextResponse.json(users.map((user: any) => {
+      const attendance = user.attendances?.[0];
+      const waypoint = attendance?.waypoints?.[0];
+      const stop = attendance?.stops?.[0];
+      const tamper = attendance?.tamper_logs[0];
+      const device = user.devices[0];
+      const telemetry = device?.telemetry && typeof device.telemetry === 'object' ? device.telemetry as any : undefined;
+      const shiftStatus = !attendance
+        ? 'OFF_DUTY'
+        : attendance.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : attendance.status;
+
+      return {
+        user_id: user.id,
+        full_name: user.full_name,
+        designation: user.designation,
+        department_name: user.department?.name || 'Unassigned',
+        shift_status: shiftStatus,
+        current_location: waypoint ? {
+          latitude: waypoint.latitude,
+          longitude: waypoint.longitude,
+          accuracy: waypoint.accuracy,
+          speed: waypoint.speed,
+          heading: waypoint.heading,
+          address_name: stop?.address_name || 'Location unavailable',
+          last_ping_at: waypoint.recorded_at.toISOString(),
+        } : undefined,
+        is_moving: Boolean(waypoint && waypoint.speed > 3),
+        dwell_minutes: stop ? Math.round(stop.dwell_duration_seconds / 60) : 0,
+        battery_level: telemetry?.battery_level,
+        telemetry,
+        device_model: device?.device_model || 'No device bound',
+        device_uuid: device?.device_uuid,
+        gps_enabled: tamper?.event_type !== 'GPS_DISABLED',
+        has_tamper_alert: Boolean(tamper),
+      };
+    }));
+  } catch (error) {
+    return authErrorResponse(error);
+  }
 }

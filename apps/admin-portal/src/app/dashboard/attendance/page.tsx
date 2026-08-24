@@ -14,6 +14,7 @@ export default function AttendancePage() {
   const [records, setRecords] = useState<AttendanceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [employees, setEmployees] = useState<any[]>([]);
 
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<AttendanceSummary | null>(null);
@@ -21,7 +22,7 @@ export default function AttendancePage() {
   const [overrideReason, setOverrideReason] = useState('Left office early for personal appointment');
 
   const [showCheckInModal, setShowCheckInModal] = useState(false);
-  const [manualUserId, setManualUserId] = useState('user-amit-employee');
+  const [manualUserId, setManualUserId] = useState('');
   const [manualTime, setManualTime] = useState('09:00');
   const [manualReason, setManualReason] = useState('Phone battery discharged in morning');
 
@@ -38,6 +39,14 @@ export default function AttendancePage() {
 
   useEffect(() => {
     fetchAttendance();
+    fetch('/api/employees')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setEmployees(data);
+          setManualUserId(data[0]?.id || '');
+        }
+      });
   }, []);
 
   const handleForceCheckout = async (e: React.FormEvent) => {
@@ -67,7 +76,7 @@ export default function AttendancePage() {
       body: JSON.stringify({
         action: 'manual_checkin',
         user_id: manualUserId,
-        check_in_time: new Date().toISOString(),
+        check_in_time: new Date(`${new Date().toISOString().slice(0, 10)}T${manualTime}:00+05:30`).toISOString(),
         reason: manualReason,
       }),
     });
@@ -314,9 +323,9 @@ export default function AttendancePage() {
                   onChange={(e) => setManualUserId(e.target.value)}
                   className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 >
-                  <option value="user-amit-employee">Amit Patel (North Region)</option>
-                  <option value="user-sneha-employee">Sneha Roy (East Region)</option>
-                  <option value="user-vikram-employee">Vikram Singh (West Region)</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>{employee.full_name} ({employee.department_name})</option>
+                  ))}
                 </select>
               </div>
               <div>

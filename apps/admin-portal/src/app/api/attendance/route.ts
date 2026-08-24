@@ -1,79 +1,129 @@
 import { NextResponse } from 'next/server';
-import { getStore } from '@perzent/database';
-import { SYSTEM_CONFIG, AttendanceSummary } from '@perzent/shared-types';
+import { prisma } from '@perzent/database';
+import { authErrorResponse, requireSession } from '@/lib/auth';
 
-export async function GET() {
-  const store = getStore();
-  const records: AttendanceSummary[] = store.attendanceRecords.map((a) => {
-    const user = store.users.find((u) => u.id === a.user_id);
-    return {
-      id: a.id,
-      user_id: a.user_id,
-      user_name: user ? user.full_name : 'Unknown',
-      work_date: a.work_date,
-      punch_in_time: a.punch_in_time,
-      punch_out_time: a.punch_out_time,
-      punch_in_by: a.punch_in_by,
-      punch_out_by: a.punch_out_by,
-      punch_out_override_time: a.punch_out_override_time,
-      override_reason: a.override_reason,
-      status: a.status,
-      gross_worked_minutes: a.gross_worked_minutes || 0,
-      total_break_minutes: a.total_break_minutes || 0,
-      net_worked_minutes: a.net_worked_minutes || 0,
-    };
-  });
-  return NextResponse.json(records);
+const summary = (record: any) => ({
+  id: record.id,
+  user_id: record.user_id,
+  user_name: record.user.full_name,
+  work_date: record.work_date.toISOString().slice(0, 10),
+  punch_in_time: record.punch_in_time.toISOString(),
+  punch_out_time: record.punch_out_time?.toISOString() || null,
+  punch_in_by: record.punch_in_by,
+  punch_out_by: record.punch_out_by,
+  punch_out_override_time: record.punch_out_override_time?.toISOString() || null,
+  override_reason: record.override_reason,
+  status: record.status,
+  gross_worked_minutes: record.gross_worked_minutes,
+  total_break_minutes: record.total_break_minutes,
+  net_worked_minutes: record.net_worked_minutes,
+});
+
+export async function GET(request: Request) {
+  try {
+    const session = await requireSession(request, ['OWNER', 'MANAGER']);
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        user: {
+          company_id: session.companyId,
+          ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
+        },
+      },
+      include: { user: { select: { full_name: true } } },
+      orderBy: [{ work_date: 'desc' }, { punch_in_time: 'desc' }],
+      take: 1000,
+    });
+    return NextResponse.json(records.map(summary));
+  } catch (error) {
+    return authErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {
   try {
+    const session = await requireSession(request, ['OWNER', 'MANAGER']);
     const body = await request.json();
-    const store = getStore();
 
     if (body.action === 'force_checkout') {
-      const { attendance_id, override_time, reason } = body;
-      const record = store.attendanceRecords.find((a) => a.id === attendance_id);
-      if (!record) {
-        return NextResponse.json({ error: 'Attendance session not found' }, { status: 404 });
+      if (!body.attendance_id || !body.reason?.trim()) {
+        return NextResponse.json({ error: 'Attendance record and reason are required' }, { status: 400 });
+      }
+      const record = await prisma.attendanceRecord.findFirst({
+        where: {
+          id: body.attendance_id,
+          user: {
+            company_id: session.companyId,
+            ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
+          },
+        },
+      });
+      if (!record) return NextResponse.json({ error: 'Attendance session not found' }, { status: 404 });
+      if (['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(record.status)) {
+        return NextResponse.json({ error: 'Attendance session is already closed' }, { status: 409 });
       }
 
-      record.punch_out_time = new Date().toISOString();
-      record.punch_out_by = 'MANAGER';
-      record.punch_out_override_time = override_time;
-      record.override_reason = reason;
-      record.status = 'CHECKED_OUT';
-
-      return NextResponse.json({ success: true, message: 'Employee force checked out successfully.', record });
+      const override = body.override_time
+        ? new Date(`${record.work_date.toISOString().slice(0, 10)}T${body.override_time}:00+05:30`)
+        : new Date();
+      if (Number.isNaN(override.getTime()) || override < record.punch_in_time) {
+        return NextResponse.json({ error: 'Checkout time must be after check-in' }, { status: 400 });
+      }
+      const gross = Math.max(0, Math.round((override.getTime() - record.punch_in_time.getTime()) / 60000));
+      const updated = await prisma.attendanceRecord.update({
+        where: { id: record.id },
+        data: {
+          punch_out_time: override,
+          punch_out_by: session.role === 'OWNER' ? 'OWNER' : 'MANAGER',
+          punch_out_override_time: override,
+          override_reason: body.reason.trim(),
+          status: 'CHECKED_OUT',
+          gross_worked_minutes: gross,
+          net_worked_minutes: Math.max(0, gross - record.total_break_minutes),
+        },
+        include: { user: { select: { full_name: true } } },
+      });
+      return NextResponse.json({ success: true, message: 'Employee checked out.', record: summary(updated) });
     }
 
     if (body.action === 'manual_checkin') {
-      const { user_id, check_in_time, reason } = body;
-      const todayStr = new Date().toISOString().split('T')[0];
+      if (!body.user_id || !body.reason?.trim()) {
+        return NextResponse.json({ error: 'Employee and reason are required' }, { status: 400 });
+      }
+      const user = await prisma.user.findFirst({
+        where: {
+          id: body.user_id,
+          company_id: session.companyId,
+          role: { in: ['EMPLOYEE', 'MANAGER'] },
+          ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
+        },
+      });
+      if (!user) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
 
-      const newRecord = {
-        id: `att-${Date.now()}`,
-        user_id,
-        work_date: todayStr,
-        punch_in_time: check_in_time || new Date().toISOString(),
-        punch_out_time: null,
-        punch_in_by: 'MANAGER',
-        punch_out_by: null,
-        punch_in_lat: 28.6289,
-        punch_in_lng: 77.3752,
-        status: 'CHECKED_IN',
-        override_reason: reason,
-        gross_worked_minutes: 0,
-        total_break_minutes: 0,
-        net_worked_minutes: 0,
-      };
+      const checkIn = body.check_in_time ? new Date(body.check_in_time) : new Date();
+      if (Number.isNaN(checkIn.getTime())) {
+        return NextResponse.json({ error: 'Invalid check-in time' }, { status: 400 });
+      }
+      const workDate = new Date(`${checkIn.toISOString().slice(0, 10)}T00:00:00.000Z`);
+      const existing = await prisma.attendanceRecord.findUnique({
+        where: { user_id_work_date: { user_id: user.id, work_date: workDate } },
+      });
+      if (existing) return NextResponse.json({ error: 'Employee already has attendance for this date' }, { status: 409 });
 
-      store.attendanceRecords.push(newRecord);
-      return NextResponse.json({ success: true, message: 'Manual check-in created.', record: newRecord });
+      const record = await prisma.attendanceRecord.create({
+        data: {
+          user_id: user.id,
+          work_date: workDate,
+          punch_in_time: checkIn,
+          punch_in_by: session.role === 'OWNER' ? 'OWNER' : 'MANAGER',
+          override_reason: body.reason.trim(),
+        },
+        include: { user: { select: { full_name: true } } },
+      });
+      return NextResponse.json({ success: true, message: 'Manual check-in created.', record: summary(record) }, { status: 201 });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
+  } catch (error) {
+    return authErrorResponse(error);
   }
 }

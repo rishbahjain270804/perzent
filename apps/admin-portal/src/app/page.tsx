@@ -46,12 +46,18 @@ export default function LandingPage() {
           </p>
         </div>
 
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/dashboard"
             className="px-4 py-2 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5 transition"
           >
             Enter Operations Portal <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+          <Link
+            href="/download"
+            className="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-[#86EFAC]" /> Download Phone APK
           </Link>
           <Link
             href="/login"

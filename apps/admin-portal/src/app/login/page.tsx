@@ -6,8 +6,8 @@ import { Lock, Phone, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState('+919876543210');
-  const [password, setPassword] = useState('password123');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -31,18 +31,12 @@ export default function LoginPage() {
         throw new Error(data.error || 'Login failed');
       }
 
-      localStorage.setItem('perzent_session', JSON.stringify(data));
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (phone: string) => {
-    setIdentifier(phone);
-    setPassword('password123');
   };
 
   return (
@@ -109,24 +103,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Demo Fast Fill */}
-        <div className="pt-2 border-t border-slate-800 space-y-1.5 text-[11px]">
-          <span className="text-[#6B7280]">Quick Demo Login:</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => fillDemo('+919876543210')}
-              className="flex-1 py-1 rounded border border-slate-800 bg-slate-900 text-slate-300 hover:text-white text-[10px]"
-            >
-              Rajesh (Owner)
-            </button>
-            <button
-              onClick={() => fillDemo('+919876543211')}
-              className="flex-1 py-1 rounded border border-slate-800 bg-slate-900 text-slate-300 hover:text-white text-[10px]"
-            >
-              Priya (Manager)
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

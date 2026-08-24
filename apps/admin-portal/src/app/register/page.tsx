@@ -37,7 +37,6 @@ export default function RegisterPage() {
         throw new Error(data.error || 'Registration failed');
       }
 
-      localStorage.setItem('perzent_session', JSON.stringify(data));
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);

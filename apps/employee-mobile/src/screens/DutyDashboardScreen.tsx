@@ -11,11 +11,12 @@ import {
 import { LocationTrackingService } from '../services/LocationTrackingService';
 import { DeviceTelemetryService } from '../services/DeviceTelemetryService';
 import { DeviceTelemetry, SoundMode } from '@perzent/shared-types';
+import { EmployeeApi } from '../services/EmployeeApi';
 
 export default function DutyDashboardScreen({ session, deviceInfo }: { session: any; deviceInfo: any }) {
-  const [shiftStatus, setShiftStatus] = useState<'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK'>('CHECKED_IN');
+  const [shiftStatus, setShiftStatus] = useState<'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK'>('CHECKED_OUT');
   const [gpsHardwareOn, setGpsHardwareOn] = useState(true);
-  const [elapsedSec, setElapsedSec] = useState(14400);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [breakTimerSec, setBreakTimerSec] = useState(1800);
   const [currentAddress, setCurrentAddress] = useState('Sector 62, Head Office Hub, Noida');
   const [telemetry, setTelemetry] = useState<DeviceTelemetry>(DeviceTelemetryService.getTelemetry());
@@ -32,6 +33,22 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
   }, []);
 
   useEffect(() => {
+    EmployeeApi.attendance(session)
+      .then((data) => {
+        const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
+        setShiftStatus(status);
+        if (data.punch_in_time) {
+          setElapsedSec(Math.max(0, Math.floor((Date.now() - new Date(data.punch_in_time).getTime()) / 1000)));
+        }
+        if (data.active_break_started_at) {
+          const used = Math.floor((Date.now() - new Date(data.active_break_started_at).getTime()) / 1000);
+          setBreakTimerSec(Math.max(0, 1800 - used));
+        }
+      })
+      .catch((error) => Alert.alert('Sync Failed', error.message));
+  }, [session]);
+
+  useEffect(() => {
     let interval: any;
     if (shiftStatus === 'CHECKED_IN') {
       interval = setInterval(() => setElapsedSec((prev) => prev + 1), 1000);
@@ -45,11 +62,12 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
       interval = setInterval(() => {
         setBreakTimerSec((prev) => {
           if (prev <= 1) {
-            setShiftStatus('CHECKED_IN');
-            Alert.alert(
-              'Lunch Break Ended',
-              'Your 30-minute lunch break has concluded. Background tracking has automatically resumed.'
-            );
+            EmployeeApi.attendance(session, 'POST', { action: 'resume' })
+              .then(() => {
+                setShiftStatus('CHECKED_IN');
+                Alert.alert('Lunch Break Ended', 'Your break has concluded and the shift has resumed.');
+              })
+              .catch((error) => Alert.alert('Resume Failed', error.message));
             return 1800;
           }
           return prev - 1;
@@ -59,15 +77,19 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
     return () => clearInterval(interval);
   }, [shiftStatus]);
 
-  const handleCheckIn = () => {
-    if (!gpsHardwareOn) {
-      setGpsErrorModal(true);
-      return;
+  const handleCheckIn = async () => {
+    try {
+      const position = await EmployeeApi.currentPosition();
+      const result = await EmployeeApi.attendance(session, 'POST', { action: 'check_in', ...position });
+      setGpsHardwareOn(true);
+      setElapsedSec(0);
+      setShiftStatus(result.status);
+      LocationTrackingService.startTracking();
+      Alert.alert('Shift Started', 'Attendance was recorded successfully.');
+    } catch (error: any) {
+      setGpsHardwareOn(false);
+      Alert.alert('Check-In Failed', error.message);
     }
-
-    setShiftStatus('CHECKED_IN');
-    LocationTrackingService.startTracking();
-    Alert.alert('Shift Started', 'Attendance punched in. 2-minute background tracking is now active.');
   };
 
   const handleCheckOut = () => {
@@ -84,9 +106,15 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
         {
           text: 'Punch Out',
           style: 'destructive',
-          onPress: () => {
-            setShiftStatus('CHECKED_OUT');
-            LocationTrackingService.stopTracking();
+          onPress: async () => {
+            try {
+              const position = await EmployeeApi.currentPosition();
+              await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
+              setShiftStatus('CHECKED_OUT');
+              LocationTrackingService.stopTracking();
+            } catch (error: any) {
+              Alert.alert('Check-Out Failed', error.message);
+            }
           },
         },
       ]
@@ -101,23 +129,33 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Start Break',
-          onPress: () => {
-            setShiftStatus('ON_BREAK');
-            setBreakTimerSec(1800);
-            LocationTrackingService.pauseTracking();
+          onPress: async () => {
+            try {
+              await EmployeeApi.attendance(session, 'POST', { action: 'start_break' });
+              setShiftStatus('ON_BREAK');
+              setBreakTimerSec(1800);
+              LocationTrackingService.pauseTracking();
+            } catch (error: any) {
+              Alert.alert('Break Failed', error.message);
+            }
           },
         },
       ]
     );
   };
 
-  const handleResumeShift = () => {
+  const handleResumeShift = async () => {
     if (!gpsHardwareOn) {
       setGpsErrorModal(true);
       return;
     }
-    setShiftStatus('CHECKED_IN');
-    LocationTrackingService.resumeTracking();
+    try {
+      await EmployeeApi.attendance(session, 'POST', { action: 'resume' });
+      setShiftStatus('CHECKED_IN');
+      LocationTrackingService.resumeTracking();
+    } catch (error: any) {
+      Alert.alert('Resume Failed', error.message);
+    }
   };
 
   const formatTimer = (totalSeconds: number) => {
@@ -151,7 +189,9 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
         <View style={styles.statusBadges}>
           <TouchableOpacity
             style={[styles.badge, gpsHardwareOn ? styles.badgeGpsOn : styles.badgeGpsOff]}
-            onPress={() => setGpsHardwareOn(!gpsHardwareOn)}
+            onPress={() => EmployeeApi.currentPosition()
+              .then(() => setGpsHardwareOn(true))
+              .catch(() => setGpsHardwareOn(false))}
           >
             <Text style={styles.badgeText}>{gpsHardwareOn ? '● GPS: ON' : '✕ GPS: OFF'}</Text>
           </TouchableOpacity>
@@ -541,8 +581,12 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
             <TouchableOpacity
               style={styles.modalBtn}
               onPress={() => {
-                setGpsHardwareOn(true);
-                setGpsErrorModal(false);
+                EmployeeApi.currentPosition()
+                  .then(() => {
+                    setGpsHardwareOn(true);
+                    setGpsErrorModal(false);
+                  })
+                  .catch((error) => Alert.alert('Location Required', error.message));
               }}
             >
               <Text style={styles.modalBtnText}>ENABLE LOCATION & PROCEED</Text>

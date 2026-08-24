@@ -17,14 +17,13 @@ export default function App() {
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
 
   useEffect(() => {
-    const info = DeviceBindingService.getDeviceFingerprint();
-    setDeviceInfo(info);
-
-    const saved = DeviceBindingService.getSavedSession();
-    if (saved) {
-      setSession(saved);
-    }
-    setLoading(false);
+    (async () => {
+      const info = await DeviceBindingService.getDeviceFingerprint();
+      setDeviceInfo(info);
+      const saved = await DeviceBindingService.getSavedSession();
+      if (saved) setSession(saved);
+      setLoading(false);
+    })();
   }, []);
 
   if (loading) {

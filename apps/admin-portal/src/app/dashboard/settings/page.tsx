@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Settings,
   Clock,
@@ -12,6 +12,7 @@ import {
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
   const [settings, setSettings] = useState({
     auto_checkout_time: '23:40',
     max_break_minutes: 30,
@@ -20,8 +21,29 @@ export default function SettingsPage() {
     timezone: 'Asia/Kolkata',
   });
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(async (response) => {
+        if (!response.ok) throw new Error((await response.json()).error || 'Could not load settings');
+        setSettings(await response.json());
+      })
+      .catch((reason) => setError(reason.message));
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    const response = await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setError(result.error || 'Could not save settings');
+      return;
+    }
+    setSettings(result);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -43,6 +65,7 @@ export default function SettingsPage() {
           <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" /> Policies successfully updated and applied across fleet.
         </div>
       )}
+      {error && <div className="p-2.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}
 
       <form onSubmit={handleSave} className="space-y-4">
         {/* Policy Section 1: Auto Cutoff */}

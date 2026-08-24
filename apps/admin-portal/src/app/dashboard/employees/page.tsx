@@ -19,6 +19,7 @@ import {
   GST_AMOUNT_INR,
   EMPLOYEE_TOTAL_PRICE_INR,
 } from '@perzent/shared-types';
+import { load } from '@cashfreepayments/cashfree-js';
 
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<any[]>([]);
@@ -26,7 +27,6 @@ export default function EmployeesPage() {
   const [showCashfreeModal, setShowCashfreeModal] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'DETAILS' | 'CHECKOUT' | 'SUCCESS'>('DETAILS');
   const [currentOrder, setCurrentOrder] = useState<any>(null);
-  const [selectedMethod, setSelectedMethod] = useState('UPI');
   const [processingPayment, setProcessingPayment] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
 
@@ -34,11 +34,11 @@ export default function EmployeesPage() {
     full_name: '',
     phone: '',
     email: '',
-    password: 'password123',
+    password: '',
     designation: '',
     role: 'EMPLOYEE',
-    department_id: 'dept-north-sales',
-    manager_id: 'user-priya-manager',
+    department_id: '',
+    manager_id: '',
   });
   const [message, setMessage] = useState('');
 
@@ -64,6 +64,7 @@ export default function EmployeesPage() {
           employee_name: formData.full_name,
           employee_phone: formData.phone,
           employee_email: formData.email,
+          employee_password: formData.password,
           employee_designation: formData.designation,
           employee_role: formData.role,
           employee_department_id: formData.department_id,
@@ -90,13 +91,20 @@ export default function EmployeesPage() {
     setProcessingPayment(true);
 
     try {
+      const cashfree = await load({ mode: currentOrder.cashfree_mode || 'sandbox' });
+      if (!cashfree) throw new Error('Cashfree checkout could not be loaded');
+      const checkout = await cashfree.checkout({
+        paymentSessionId: currentOrder.payment_session_id,
+        redirectTarget: '_modal',
+      });
+      if (checkout.error && !checkout.paymentDetails) {
+        throw new Error(checkout.error.message || 'Checkout was cancelled');
+      }
       const res = await fetch('/api/payments/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order_id: currentOrder.order_id,
-          cf_payment_id: `cf_pay_${Date.now()}`,
-          payment_method: selectedMethod,
         }),
       });
 
@@ -364,6 +372,20 @@ export default function EmployeesPage() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Temporary Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                    placeholder="At least 8 characters"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                  />
+                </div>
+
                 {/* Price Breakdown Box */}
                 <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-1.5 text-[11px]">
                   <div className="flex justify-between text-slate-300">
@@ -412,25 +434,7 @@ export default function EmployeesPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">Payment Method</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {['UPI', 'Card', 'NetBanking'].map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setSelectedMethod(m)}
-                        className={`py-1.5 rounded border text-xs font-medium transition ${
-                          selectedMethod === m
-                            ? 'border-[#16A34A] bg-[#16A34A]/10 text-white font-semibold'
-                            : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-400">Cashfree will open its secure hosted checkout with UPI, cards, and net banking options.</p>
 
                 <div className="pt-2 flex justify-end gap-2">
                   <button

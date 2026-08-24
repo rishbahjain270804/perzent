@@ -14,6 +14,7 @@ import {
   Clock,
   Coffee,
   Receipt,
+  Smartphone,
 } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -22,19 +23,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [session, setSession] = useState<any>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('perzent_session');
-    if (!saved) {
-      const defaultOwner = {
-        full_name: 'Rajesh Sharma',
-        role: 'OWNER',
-        company_name: 'Acme Logistics Pvt Ltd',
-        email: 'rajesh@acmelogistics.com',
-      };
-      setSession(defaultOwner);
-    } else {
-      setSession(JSON.parse(saved));
-    }
-  }, []);
+    fetch('/api/auth', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unauthenticated');
+        setSession(await response.json());
+      })
+      .catch(() => router.replace('/login'));
+  }, [router]);
 
   const navItems = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
@@ -43,13 +38,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Attendance', href: '/dashboard/attendance', icon: CalendarCheck },
     { name: 'Employees', href: '/dashboard/employees', icon: Users },
     { name: 'Billing & Invoices', href: '/dashboard/billing', icon: Receipt },
+    { name: 'Download App (APK)', href: '/download', icon: Smartphone },
     { name: 'Policies & Settings', href: '/dashboard/settings', icon: Settings },
-  ];
+  ].filter((item) => session?.role === 'OWNER' || !['Billing & Invoices', 'Policies & Settings'].includes(item.name));
 
-  const handleLogout = () => {
-    localStorage.removeItem('perzent_session');
-    router.push('/login');
+  const handleLogout = async () => {
+    await fetch('/api/auth', { method: 'DELETE' });
+    router.replace('/login');
   };
+
+  if (!session) {
+    return <div className="min-h-screen bg-[#0F172A] text-slate-400 grid place-items-center">Loading workspace…</div>;
+  }
 
   return (
     <div className="min-h-screen flex bg-[#0F172A] text-slate-100 font-sans antialiased text-xs">

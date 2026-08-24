@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { DeviceBindingService } from '../services/DeviceBindingService';
 import { DeviceTelemetryService } from '../services/DeviceTelemetryService';
+import { EmployeeApi } from '../services/EmployeeApi';
 
 export default function LoginScreen({
   onLoginSuccess,
@@ -18,8 +19,8 @@ export default function LoginScreen({
   onLoginSuccess: (user: any) => void;
   deviceInfo: any;
 }) {
-  const [phone, setPhone] = useState('+919811122233');
-  const [password, setPassword] = useState('password123');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [telemetry] = useState(DeviceTelemetryService.getTelemetry());
 
@@ -27,28 +28,14 @@ export default function LoginScreen({
     setLoading(true);
 
     try {
-      const user = {
-        user_id: 'user-amit-employee',
-        company_id: 'comp-acme-1001',
-        full_name: 'Amit Kumar',
-        designation: 'Senior Field Sales Executive',
-        department_name: 'North Delhi Sales Hub',
-        phone: phone,
-        role: 'EMPLOYEE',
-      };
-
-      DeviceBindingService.saveSession(user);
+      const user = await EmployeeApi.login(phone, password, deviceInfo);
+      await DeviceBindingService.saveSession(user);
       onLoginSuccess(user);
     } catch (err: any) {
       Alert.alert('Login Failed', err.message || 'Unable to authenticate');
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (demoPhone: string) => {
-    setPhone(demoPhone);
-    setPassword('password123');
   };
 
   return (
@@ -148,23 +135,6 @@ export default function LoginScreen({
           </Text>
         </View>
 
-        <View style={styles.demoSection}>
-          <Text style={styles.demoTitle}>QUICK DEMO FIELD REPS:</Text>
-          <View style={styles.demoRow}>
-            <TouchableOpacity
-              style={styles.demoBtn}
-              onPress={() => fillDemo('+919811122233')}
-            >
-              <Text style={styles.demoBtnText}>Amit Kumar (Sales)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.demoBtn}
-              onPress={() => fillDemo('+919811122244')}
-            >
-              <Text style={styles.demoBtnText}>Sneha Patel (Client)</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
       </View>
     </ScrollView>
   );

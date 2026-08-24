@@ -1,11 +1,45 @@
 import { NextResponse } from 'next/server';
-import { getStore } from '@perzent/database';
+import { compare, hash } from 'bcryptjs';
+import { prisma } from '@perzent/database';
 import { RegisterCompanySchema, LoginSchema } from '@perzent/shared-types';
+import {
+  authErrorResponse,
+  clearSessionCookie,
+  createSession,
+  requireSession,
+  revokeSession,
+  setSessionCookie,
+} from '@/lib/auth';
+
+const userPayload = (user: any) => ({
+  user_id: user.id,
+  company_id: user.company_id,
+  company_name: user.company?.name,
+  role: user.role,
+  full_name: user.full_name,
+  email: user.email,
+  phone: user.phone,
+  designation: user.designation,
+  department_id: user.department_id,
+  manager_id: user.manager_id,
+});
+
+export async function GET(request: Request) {
+  try {
+    const session = await requireSession(request);
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: session.userId },
+      include: { company: { select: { name: true } } },
+    });
+    return NextResponse.json(userPayload(user));
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const store = getStore();
 
     if (body.action === 'register') {
       const parsed = RegisterCompanySchema.safeParse(body);
@@ -13,107 +47,110 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
       }
 
-      const existing = store.companies.find((c) => c.owner_email === parsed.data.email);
+      const email = parsed.data.email.toLowerCase();
+      const existing = await prisma.company.findUnique({ where: { owner_email: email } });
       if (existing) {
         return NextResponse.json({ error: 'Company email already registered' }, { status: 409 });
       }
 
-      const companyId = `comp-${Date.now()}`;
-      const ownerId = `user-${Date.now()}`;
-
-      const newCompany = {
-        id: companyId,
-        name: parsed.data.company_name,
-        owner_email: parsed.data.email,
-        timezone: parsed.data.timezone || 'Asia/Kolkata',
-        auto_checkout_time: '23:40',
-        max_break_minutes: 30,
-        route_retention_days: 15,
-        attendance_retention_days: 45,
-        plan_tier: 'FREE',
-        created_at: new Date().toISOString(),
-      };
-
-      const newOwner = {
-        id: ownerId,
-        company_id: companyId,
-        full_name: parsed.data.owner_name,
-        email: parsed.data.email,
-        phone: parsed.data.phone,
-        password: parsed.data.password,
-        role: 'OWNER',
-        designation: 'Business Owner & Superadmin',
-        status: 'ACTIVE',
-      };
-
-      store.companies.push(newCompany);
-      store.users.push(newOwner);
-
-      return NextResponse.json({
-        user_id: ownerId,
-        company_id: companyId,
-        role: 'OWNER',
-        full_name: newOwner.full_name,
-        email: newOwner.email,
-        token: `token-jwt-${ownerId}`,
+      const passwordHash = await hash(parsed.data.password, 12);
+      const user = await prisma.$transaction(async (tx: any) => {
+        const company = await tx.company.create({
+          data: {
+            name: parsed.data.company_name,
+            owner_email: email,
+            timezone: parsed.data.timezone || 'Asia/Kolkata',
+          },
+        });
+        await tx.department.create({ data: { company_id: company.id, name: 'General' } });
+        return tx.user.create({
+          data: {
+            company_id: company.id,
+            full_name: parsed.data.owner_name,
+            email,
+            phone: parsed.data.phone,
+            password_hash: passwordHash,
+            role: 'OWNER',
+            designation: 'Business Owner & Superadmin',
+          },
+          include: { company: { select: { name: true } } },
+        });
       });
+
+      const session = await createSession(user.id);
+      const response = NextResponse.json(userPayload(user), { status: 201 });
+      setSessionCookie(response, session.token, session.expiresAt);
+      return response;
     }
 
-    // Default: Login
     const parsed = LoginSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
 
-    const user = store.users.find(
-      (u) =>
-        (u.phone === parsed.data.phone_or_email || u.email === parsed.data.phone_or_email) &&
-        u.password === parsed.data.password
-    );
-
-    if (!user) {
+    const identifier = parsed.data.phone_or_email.trim();
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ phone: identifier }, { email: identifier.toLowerCase() }] },
+      include: { company: { select: { name: true } } },
+    });
+    if (!user || !(await compare(parsed.data.password, user.password_hash))) {
       return NextResponse.json({ error: 'Invalid phone/email or password' }, { status: 401 });
     }
-
     if (user.status !== 'ACTIVE') {
       return NextResponse.json({ error: 'Account is inactive. Please contact administration.' }, { status: 403 });
     }
 
-    // Device binding check for Mobile Employee login
     if (parsed.data.device_uuid) {
-      const existingDevice = store.userDevices.find((d) => d.user_id === user.id && d.is_active);
+      if (user.role !== 'EMPLOYEE') {
+        return NextResponse.json({ error: 'Only employee accounts can use the field app' }, { status: 403 });
+      }
+      const existingDevice = await prisma.userDevice.findFirst({
+        where: { user_id: user.id, is_active: true },
+      });
       if (existingDevice && existingDevice.device_uuid !== parsed.data.device_uuid) {
         return NextResponse.json(
           { error: 'Device mismatch. Account is bound to another phone. Contact your manager to reset.' },
           { status: 403 }
         );
       }
-
-      if (!existingDevice) {
-        store.userDevices.push({
-          id: `dev-${Date.now()}`,
+      await prisma.userDevice.upsert({
+        where: { user_id_device_uuid: { user_id: user.id, device_uuid: parsed.data.device_uuid } },
+        update: {
+          is_active: true,
+          device_model: parsed.data.device_model || 'Unknown',
+          os_version: parsed.data.os_version || 'Unknown',
+          last_seen_at: new Date(),
+        },
+        create: {
           user_id: user.id,
           device_uuid: parsed.data.device_uuid,
           device_model: parsed.data.device_model || 'Unknown',
           os_version: parsed.data.os_version || 'Unknown',
-          is_active: true,
-          last_seen_at: new Date().toISOString(),
-        });
-      }
+        },
+      });
+    } else if (user.role === 'EMPLOYEE') {
+      return NextResponse.json({ error: 'Employees must sign in from the registered field app' }, { status: 403 });
     }
 
-    return NextResponse.json({
-      user_id: user.id,
-      company_id: user.company_id,
-      role: user.role,
-      full_name: user.full_name,
-      email: user.email,
-      phone: user.phone,
-      department_id: user.department_id,
-      manager_id: user.manager_id,
-      token: `token-jwt-${user.id}`,
+    const session = await createSession(user.id);
+    const response = NextResponse.json({
+      ...userPayload(user),
+      ...(parsed.data.device_uuid ? { token: session.token } : {}),
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
+    setSessionCookie(response, session.token, session.expiresAt);
+    return response;
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    await revokeSession(request);
+    const response = NextResponse.json({ success: true });
+    clearSessionCookie(response);
+    return response;
+  } catch (error) {
+    return authErrorResponse(error);
   }
 }

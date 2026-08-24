@@ -8,14 +8,14 @@ export const RegisterCompanySchema = z.object({
   owner_name: z.string().min(2, 'Owner name is required'),
   email: z.string().email('Invalid email address'),
   phone: z.string().min(10, 'Valid phone number is required'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   timezone: z.string().default('Asia/Kolkata'),
 });
 export type RegisterCompanyDto = z.infer<typeof RegisterCompanySchema>;
 
 export const LoginSchema = z.object({
   phone_or_email: z.string().min(3, 'Phone or email is required'),
-  password: z.string().min(4, 'Password is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   device_uuid: z.string().optional(),
   device_model: z.string().optional(),
   os_version: z.string().optional(),

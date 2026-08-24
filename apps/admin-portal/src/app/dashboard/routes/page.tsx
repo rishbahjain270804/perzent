@@ -12,7 +12,8 @@ import {
 import { DailyRoutePlayback } from '@perzent/shared-types';
 
 export default function RoutePlaybackPage() {
-  const [selectedUser, setSelectedUser] = useState('user-amit-employee');
+  const [selectedUser, setSelectedUser] = useState('');
+  const [employees, setEmployees] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [playback, setPlayback] = useState<DailyRoutePlayback | null>(null);
   const [timelineIndex, setTimelineIndex] = useState(0);
@@ -25,6 +26,7 @@ export default function RoutePlaybackPage() {
   const maxDateStr = new Date().toISOString().split('T')[0];
 
   const fetchRoute = () => {
+    if (!selectedUser) return;
     setLoading(true);
     fetch(`/api/routes?user_id=${selectedUser}&date=${selectedDate}`)
       .then((res) => res.json())
@@ -35,6 +37,17 @@ export default function RoutePlaybackPage() {
       })
       .catch(() => setLoading(false));
   };
+
+  useEffect(() => {
+    fetch('/api/employees')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setEmployees(data);
+          setSelectedUser((current) => current || data[0]?.id || '');
+        }
+      });
+  }, []);
 
   useEffect(() => {
     fetchRoute();
@@ -75,9 +88,9 @@ export default function RoutePlaybackPage() {
             onChange={(e) => setSelectedUser(e.target.value)}
             className="px-2.5 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white focus:outline-none focus:border-[#16A34A]"
           >
-            <option value="user-amit-employee">Amit Patel (North Region)</option>
-            <option value="user-sneha-employee">Sneha Roy (East Region)</option>
-            <option value="user-vikram-employee">Vikram Singh (West Region)</option>
+            {employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>{employee.full_name} ({employee.department_name})</option>
+            ))}
           </select>
 
           <input

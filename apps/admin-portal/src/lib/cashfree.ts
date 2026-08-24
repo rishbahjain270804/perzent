@@ -7,11 +7,14 @@ import {
   GST_AMOUNT_INR,
   EMPLOYEE_TOTAL_PRICE_INR,
 } from '@perzent/shared-types';
+import { createHmac } from 'crypto';
+import { safeEqual } from './auth';
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || '';
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || '';
 const CASHFREE_ENV = process.env.CASHFREE_ENV || 'sandbox'; // 'sandbox' | 'production'
 const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2023-08-01';
+const ALLOW_MOCK = process.env.CASHFREE_ALLOW_MOCK === 'true' && process.env.NODE_ENV !== 'production';
 
 const BASE_URL =
   CASHFREE_ENV === 'production'
@@ -47,7 +50,6 @@ export async function createCashfreeOrder(params: CashfreeOrderParams): Promise<
     !process.env.CASHFREE_APP_ID.includes('TEST_CF_APP_PERZENT');
 
   if (isRealCredentials) {
-    try {
       const response = await fetch(`${BASE_URL}/orders`, {
         method: 'POST',
         headers: {
@@ -75,9 +77,12 @@ export async function createCashfreeOrder(params: CashfreeOrderParams): Promise<
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        return {
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Cashfree order creation failed (${response.status}): ${detail.slice(0, 300)}`);
+      }
+      const data = await response.json();
+      return {
           cf_order_id: String(data.cf_order_id),
           order_id: data.order_id,
           payment_session_id: data.payment_session_id,
@@ -85,14 +90,12 @@ export async function createCashfreeOrder(params: CashfreeOrderParams): Promise<
           order_amount: data.order_amount,
           order_currency: data.order_currency,
           is_mock: false,
-        };
-      }
-    } catch (err) {
-      console.warn('Cashfree live API call failed, falling back to local sandbox simulator:', err);
-    }
+      };
   }
 
-  // Realistic Sandbox / Local Simulation Session
+  if (!ALLOW_MOCK) throw new Error('Cashfree credentials are not configured');
+
+  // Explicit local-only simulator. It can never be enabled in production.
   const mockCfOrderId = `cf_ord_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   const mockSessionId = `session_${Math.random().toString(36).substring(2)}${Date.now()}`;
 
@@ -117,7 +120,6 @@ export async function getCashfreeOrderStatus(orderId: string): Promise<{
     !process.env.CASHFREE_APP_ID.includes('TEST_CF_APP_PERZENT');
 
   if (isRealCredentials) {
-    try {
       const response = await fetch(`${BASE_URL}/orders/${orderId}`, {
         method: 'GET',
         headers: {
@@ -126,23 +128,28 @@ export async function getCashfreeOrderStatus(orderId: string): Promise<{
           'x-api-version': CASHFREE_API_VERSION,
         },
       });
-      if (response.ok) {
-        const data = await response.json();
-        return {
+      if (!response.ok) throw new Error(`Cashfree status request failed (${response.status})`);
+      const data = await response.json();
+      return {
           order_status: data.order_status,
           payment_method: data.order_meta?.payment_methods || 'UPI',
-        };
-      }
-    } catch (err) {
-      console.warn('Cashfree status check failed:', err);
-    }
+      };
   }
 
+  if (!ALLOW_MOCK) throw new Error('Cashfree credentials are not configured');
   return {
     order_status: 'PAID',
     payment_method: 'UPI (Cashfree Gateway)',
     bank_reference: `CF-REF-${Date.now().toString().slice(-8)}`,
   };
+}
+
+export function verifyCashfreeWebhook(rawBody: string, timestamp: string | null, signature: string | null) {
+  if (!CASHFREE_SECRET_KEY || !timestamp || !signature) return false;
+  const expected = createHmac('sha256', CASHFREE_SECRET_KEY)
+    .update(timestamp + rawBody)
+    .digest('base64');
+  return safeEqual(expected, signature);
 }
 
 export function getCashfreeConfig() {

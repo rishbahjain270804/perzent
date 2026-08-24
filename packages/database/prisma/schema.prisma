@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
@@ -51,6 +52,13 @@ enum TamperEventType {
   MOCK_LOCATION_DETECTED
 }
 
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
 model Company {
   id                         String         @id @default(uuid())
   name                       String
@@ -66,6 +74,7 @@ model Company {
 
   users                      User[]
   departments                Department[]
+  payments                   PaymentTransaction[]
 }
 
 model Department {
@@ -76,6 +85,9 @@ model Department {
 
   company     Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
   users       User[]
+  payment_transactions PaymentTransaction[]
+
+  @@unique([company_id, name])
 }
 
 model User {
@@ -102,8 +114,14 @@ model User {
   stops         LocationStop[]
   waypoints     LocationWaypoint[]
   tamper_logs   TamperLog[]
+  sessions      Session[]
+  managed_payment_orders PaymentTransaction[] @relation("PaymentManager")
+  provisioned_payments   PaymentTransaction[] @relation("ProvisionedUser")
 
   @@unique([company_id, phone])
+  @@unique([company_id, email])
+  @@index([company_id, role, status])
+  @@index([manager_id])
 }
 
 model UserDevice {
@@ -116,10 +134,12 @@ model UserDevice {
   is_active      Boolean   @default(true)
   last_seen_at   DateTime  @default(now())
   created_at     DateTime  @default(now())
+  telemetry      Json?
 
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, device_uuid])
+  @@index([user_id, is_active])
 }
 
 model AttendanceRecord {
@@ -132,8 +152,8 @@ model AttendanceRecord {
   punch_out_by             PunchBy?
   punch_out_override_time  DateTime?
   override_reason          String?
-  punch_in_lat             Float
-  punch_in_lng             Float
+  punch_in_lat             Float?
+  punch_in_lng             Float?
   punch_out_lat            Float?
   punch_out_lng            Float?
   status                   ShiftStatus  @default(CHECKED_IN)
@@ -148,6 +168,9 @@ model AttendanceRecord {
   stops                    LocationStop[]
   waypoints                LocationWaypoint[]
   tamper_logs              TamperLog[]
+
+  @@unique([user_id, work_date])
+  @@index([work_date, status])
 }
 
 model AttendanceBreak {
@@ -161,6 +184,8 @@ model AttendanceBreak {
   created_at        DateTime       @default(now())
 
   attendance        AttendanceRecord @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
+
+  @@index([attendance_id, start_time])
 }
 
 model LocationStop {
@@ -177,6 +202,9 @@ model LocationStop {
 
   attendance              AttendanceRecord  @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
   user                    User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, start_time])
+  @@index([attendance_id])
 }
 
 model LocationWaypoint {
@@ -192,6 +220,9 @@ model LocationWaypoint {
 
   attendance     AttendanceRecord  @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
   user           User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, recorded_at])
+  @@index([attendance_id, recorded_at])
 }
 
 model TamperLog {
@@ -204,4 +235,57 @@ model TamperLog {
 
   attendance     AttendanceRecord? @relation(fields: [attendance_id], references: [id], onDelete: SetNull)
   user           User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, occurred_at])
+}
+
+model PaymentTransaction {
+  id                     String        @id @default(uuid())
+  company_id             String
+  order_id               String        @unique
+  cashfree_order_id       String?
+  payment_session_id      String?
+  employee_name          String
+  employee_phone         String
+  employee_email         String?
+  employee_password_hash String?
+  employee_designation   String
+  employee_role          Role          @default(EMPLOYEE)
+  employee_department_id String?
+  employee_manager_id    String?
+  provisioned_user_id    String?
+  base_price             Decimal       @db.Decimal(10, 2)
+  tax_amount             Decimal       @db.Decimal(10, 2)
+  total_amount           Decimal       @db.Decimal(10, 2)
+  currency               String        @default("INR")
+  status                 PaymentStatus @default(PENDING)
+  payment_method         String?
+  bank_reference         String?
+  invoice_number         String?       @unique
+  created_at             DateTime      @default(now())
+  paid_at                DateTime?
+  updated_at             DateTime      @updatedAt
+
+  company                Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  employee_department    Department?    @relation(fields: [employee_department_id], references: [id], onDelete: SetNull)
+  employee_manager       User?          @relation("PaymentManager", fields: [employee_manager_id], references: [id], onDelete: SetNull)
+  provisioned_user       User?          @relation("ProvisionedUser", fields: [provisioned_user_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id, status, created_at])
+  @@index([employee_department_id])
+  @@index([employee_manager_id])
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  token_hash  String   @unique
+  user_id     String
+  expires_at  DateTime
+  created_at  DateTime @default(now())
+  last_seen_at DateTime @default(now())
+
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
 }
