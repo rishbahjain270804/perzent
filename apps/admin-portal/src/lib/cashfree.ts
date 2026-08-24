@@ -44,53 +44,75 @@ export interface CashfreeCreateOrderResult {
   is_mock?: boolean;
 }
 
+export function sanitizeCustomerPhone(inputPhone?: string): string {
+  if (!inputPhone) return '9876543210';
+  let digits = inputPhone.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 10) {
+    return digits;
+  }
+  if (digits.length === 9) {
+    return digits + '0';
+  }
+  if (digits.length < 10) {
+    return (digits + '9876543210').slice(0, 10);
+  }
+  if (digits.length > 15) {
+    return digits.slice(0, 15);
+  }
+  return digits;
+}
+
 export async function createCashfreeOrder(params: CashfreeOrderParams): Promise<CashfreeCreateOrderResult> {
   const isRealCredentials =
     process.env.CASHFREE_APP_ID &&
     !process.env.CASHFREE_APP_ID.includes('TEST_CF_APP_PERZENT');
 
   if (isRealCredentials) {
-      const response = await fetch(`${BASE_URL}/orders`, {
-        method: 'POST',
-        headers: {
-          'x-client-id': CASHFREE_APP_ID,
-          'x-client-secret': CASHFREE_SECRET_KEY,
-          'x-api-version': CASHFREE_API_VERSION,
-          'Content-Type': 'application/json',
+    const cleanPhone = sanitizeCustomerPhone(params.customer_phone);
+    const response = await fetch(`${BASE_URL}/orders`, {
+      method: 'POST',
+      headers: {
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY,
+        'x-api-version': CASHFREE_API_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        order_id: params.order_id,
+        order_amount: params.order_amount,
+        order_currency: params.order_currency || 'INR',
+        customer_details: {
+          customer_id: params.customer_id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50),
+          customer_name: params.customer_name || 'Business Owner',
+          customer_phone: cleanPhone,
+          customer_email: params.customer_email || 'billing@perzent.app',
         },
-        body: JSON.stringify({
-          order_id: params.order_id,
-          order_amount: params.order_amount,
-          order_currency: params.order_currency || 'INR',
-          customer_details: {
-            customer_id: params.customer_id,
-            customer_name: params.customer_name,
-            customer_phone: params.customer_phone.replace(/^\+91/, '').replace(/\s+/g, ''),
-            customer_email: params.customer_email || 'billing@perzent.app',
-          },
-          order_meta: {
-            return_url: params.return_url,
-            notify_url: params.notify_url,
-            payment_methods: 'cc,dc,upi,nb',
-          },
-          order_note: params.order_note || 'Perzent Employee Seat (₹99 + 18% GST)',
-        }),
-      });
+        order_meta: {
+          return_url: params.return_url,
+          notify_url: params.notify_url,
+          payment_methods: 'cc,dc,upi,nb',
+        },
+        order_note: params.order_note || 'Perzent Employee Seat (₹99 + 18% GST)',
+      }),
+    });
 
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Cashfree order creation failed (${response.status}): ${detail.slice(0, 300)}`);
-      }
-      const data = await response.json();
-      return {
-          cf_order_id: String(data.cf_order_id),
-          order_id: data.order_id,
-          payment_session_id: data.payment_session_id,
-          order_status: data.order_status,
-          order_amount: data.order_amount,
-          order_currency: data.order_currency,
-          is_mock: false,
-      };
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Cashfree order creation failed (${response.status}): ${detail.slice(0, 300)}`);
+    }
+    const data = await response.json();
+    return {
+      cf_order_id: String(data.cf_order_id),
+      order_id: data.order_id,
+      payment_session_id: data.payment_session_id,
+      order_status: data.order_status,
+      order_amount: data.order_amount,
+      order_currency: data.order_currency,
+      is_mock: false,
+    };
   }
 
   if (!ALLOW_MOCK) throw new Error('Cashfree credentials are not configured');
@@ -120,20 +142,20 @@ export async function getCashfreeOrderStatus(orderId: string): Promise<{
     !process.env.CASHFREE_APP_ID.includes('TEST_CF_APP_PERZENT');
 
   if (isRealCredentials) {
-      const response = await fetch(`${BASE_URL}/orders/${orderId}`, {
-        method: 'GET',
-        headers: {
-          'x-client-id': CASHFREE_APP_ID,
-          'x-client-secret': CASHFREE_SECRET_KEY,
-          'x-api-version': CASHFREE_API_VERSION,
-        },
-      });
-      if (!response.ok) throw new Error(`Cashfree status request failed (${response.status})`);
-      const data = await response.json();
-      return {
-          order_status: data.order_status,
-          payment_method: data.order_meta?.payment_methods || 'UPI',
-      };
+    const response = await fetch(`${BASE_URL}/orders/${orderId}`, {
+      method: 'GET',
+      headers: {
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY,
+        'x-api-version': CASHFREE_API_VERSION,
+      },
+    });
+    if (!response.ok) throw new Error(`Cashfree status request failed (${response.status})`);
+    const data = await response.json();
+    return {
+      order_status: data.order_status,
+      payment_method: data.order_meta?.payment_methods || 'UPI',
+    };
   }
 
   if (!ALLOW_MOCK) throw new Error('Cashfree credentials are not configured');

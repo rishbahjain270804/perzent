@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       order_currency: 'INR',
       customer_id: company.id,
       customer_name: data.customer_name || company.name,
-      customer_phone: data.customer_phone || session.phone,
+      customer_phone: data.customer_phone || data.employee_phone || session.phone,
       customer_email: data.customer_email || session.email || company.owner_email,
       return_url: `${origin}/dashboard/employees?order_id=${encodeURIComponent(orderId)}`,
       notify_url: `${origin}/api/payments/webhook`,

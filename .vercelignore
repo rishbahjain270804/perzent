@@ -1,0 +1,8 @@
+.git
+.turbo
+.next
+node_modules
+apps/employee-mobile/android
+apps/employee-mobile/ios
+apps/employee-mobile/.expo
+*.log
