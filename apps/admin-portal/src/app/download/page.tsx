@@ -34,7 +34,7 @@ export default function DownloadPage() {
     // Trigger direct APK file download
     const link = document.createElement('a');
     link.href = '/api/download/apk';
-    link.download = 'perzent-employee-v3.0.0.apk';
+    link.download = 'perzent-employee-v1.1.2.apk';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -72,7 +72,7 @@ export default function DownloadPage() {
         {/* Banner */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-slate-800 bg-slate-900/80 text-[#86EFAC] text-[11px] font-medium">
-            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android App • Version 3.0.0 (Build #3)
+            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android App • Version 1.1.2 (Build #4)
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
             Download Perzent Field Employee App

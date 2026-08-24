@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-const fileName = 'perzent-employee-v3.0.0.apk';
+const fileName = 'perzent-employee-v1.1.2.apk';
 
 function getArtifactUrl() {
   const value = process.env.EMPLOYEE_APK_URL;
@@ -21,6 +21,8 @@ function getLocalArtifactPath() {
   if (fs.existsSync(primary)) return primary;
   const latest = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-latest.apk');
   if (fs.existsSync(latest)) return latest;
+  const v3 = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-v3.0.0.apk');
+  if (fs.existsSync(v3)) return v3;
   const legacy = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-v1.1.1.apk');
   if (fs.existsSync(legacy)) return legacy;
   return primary;

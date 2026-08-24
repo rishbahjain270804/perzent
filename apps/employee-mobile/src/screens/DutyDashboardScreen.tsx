@@ -532,7 +532,7 @@ export default function DutyDashboardScreen({
           <View style={styles.appVersionCard}>
             <View style={styles.appVersionInfo}>
               <Text style={styles.appVersionTitle}>Perzent Workforce</Text>
-              <Text style={styles.appVersionSubtitle}>Version 3.0.0 (Build #3)</Text>
+              <Text style={styles.appVersionSubtitle}>Version 1.1.2 (Build #4)</Text>
             </View>
             <TouchableOpacity
               style={styles.checkUpdateButton}

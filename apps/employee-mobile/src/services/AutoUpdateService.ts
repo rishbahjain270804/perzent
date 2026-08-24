@@ -20,10 +20,10 @@ export class AutoUpdateService {
     const version =
       Constants.expoConfig?.version ||
       Application.nativeApplicationVersion ||
-      '3.0.0';
+      '1.1.2';
     const versionCode =
       Constants.expoConfig?.android?.versionCode ||
-      (Application.nativeBuildVersion ? parseInt(Application.nativeBuildVersion, 10) : 3);
+      (Application.nativeBuildVersion ? parseInt(Application.nativeBuildVersion, 10) : 4);
     return { version, versionCode };
   }
 

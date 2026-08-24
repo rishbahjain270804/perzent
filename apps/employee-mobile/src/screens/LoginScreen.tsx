@@ -98,7 +98,7 @@ export default function LoginScreen({
           style={styles.updateButton}
           onPress={() => AutoUpdateService.manualCheck()}
         >
-          <Text style={styles.updateButtonText}>🔄 Check for App Updates • v3.0.0 (Build #3)</Text>
+          <Text style={styles.updateButtonText}>🔄 Check for App Updates • v1.1.2 (Build #4)</Text>
         </TouchableOpacity>
 
         <Text style={styles.footer}>Accounts are created by your employer.</Text>
