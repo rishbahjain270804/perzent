@@ -14,7 +14,8 @@ export async function POST(request: Request) {
     const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const body = await request.json();
     const workDate = todayIst();
-    const attendance = await prisma.attendanceRecord.findUnique({
+
+    let attendance = await prisma.attendanceRecord.findUnique({
       where: {
         user_id_work_date: {
           user_id: session.userId,
@@ -22,6 +23,16 @@ export async function POST(request: Request) {
         },
       },
     });
+
+    if (!attendance) {
+      attendance = await prisma.attendanceRecord.findFirst({
+        where: {
+          user_id: session.userId,
+          status: { in: ['CHECKED_IN', 'ON_BREAK'] },
+        },
+        orderBy: { punch_in_time: 'desc' },
+      });
+    }
 
     if (!attendance || ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
       return NextResponse.json({ error: 'No active attendance session for today' }, { status: 409 });

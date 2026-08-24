@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { authErrorResponse, requireSession } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 const getTodayIst = () => {
   const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
   return new Date(`${istDateStr}T00:00:00.000Z`);
@@ -23,7 +25,13 @@ export async function GET(request: Request) {
         department: { select: { name: true } },
         devices: { where: { is_active: true }, take: 1 },
         attendances: {
-          where: { work_date: today },
+          where: {
+            OR: [
+              { work_date: today },
+              { status: { in: ['CHECKED_IN', 'ON_BREAK'] } },
+            ],
+          },
+          orderBy: { punch_in_time: 'desc' },
           take: 1,
           include: {
             breaks: { where: { end_time: null }, take: 1 },

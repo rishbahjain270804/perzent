@@ -39,18 +39,40 @@ export class EmployeeApi {
     if (permission.status !== 'granted') throw new Error('Location permission is required');
     const servicesEnabled = await Location.hasServicesEnabledAsync();
     if (!servicesEnabled) throw new Error('Turn on Location Services (GPS) to continue');
-    const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+
+    let position: any = null;
+    try {
+      position = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 6000)),
+      ]);
+    } catch {
+      position = await Location.getLastKnownPositionAsync().catch(() => null);
+    }
+
+    if (!position?.coords) {
+      position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest }).catch(() => null);
+    }
+
+    if (!position?.coords) {
+      throw new Error('Unable to acquire GPS position. Ensure GPS is enabled with clear sky view.');
+    }
+
     if ((position.coords as typeof position.coords & { mocked?: boolean }).mocked) {
       throw new Error('Mock or fake location is not allowed');
     }
+
     return {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
-      accuracy: position.coords.accuracy,
+      accuracy: position.coords.accuracy || 10,
+      speed: position.coords.speed || 0,
+      heading: position.coords.heading || 0,
     };
   }
 
   static async sendWaypoint(session: any, position: { latitude: number; longitude: number; accuracy?: number; speed?: number; heading?: number }) {
+    if (!session?.token) return null;
     const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WAYPOINTS}`, {
       method: 'POST',
       headers: {
@@ -60,7 +82,7 @@ export class EmployeeApi {
       body: JSON.stringify({
         latitude: position.latitude,
         longitude: position.longitude,
-        accuracy: position.accuracy,
+        accuracy: position.accuracy || 10,
         speed: position.speed || 0,
         heading: position.heading || 0,
       }),
