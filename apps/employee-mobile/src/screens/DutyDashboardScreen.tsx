@@ -23,8 +23,11 @@ export default function DutyDashboardScreen({
   onLogout: () => void;
 }) {
   const [shiftStatus, setShiftStatus] = useState<ShiftStatus>('CHECKED_OUT');
+  const [alreadyCompletedToday, setAlreadyCompletedToday] = useState(false);
   const [punchInTimestamp, setPunchInTimestamp] = useState<number | null>(null);
   const [breakStartTimestamp, setBreakStartTimestamp] = useState<number | null>(null);
+  const [serverTimeOffset, setServerTimeOffset] = useState<number>(0);
+  const [lastWaypointTime, setLastWaypointTime] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [breakTimerSec, setBreakTimerSec] = useState(1800);
   const [readiness, setReadiness] = useState<WorkReadiness | null>(null);
@@ -47,67 +50,62 @@ export default function DutyDashboardScreen({
   }, [deviceInfo, session]);
 
   const updateClocks = useCallback(() => {
+    const currentServerNow = Date.now() + serverTimeOffset;
     if (punchInTimestamp && shiftStatus === 'CHECKED_IN') {
-      setElapsedSec(Math.max(0, Math.floor((Date.now() - punchInTimestamp) / 1000)));
+      setElapsedSec(Math.max(0, Math.floor((currentServerNow - punchInTimestamp) / 1000)));
     }
     if (breakStartTimestamp && shiftStatus === 'ON_BREAK') {
-      const used = Math.floor((Date.now() - breakStartTimestamp) / 1000);
+      const used = Math.floor((currentServerNow - breakStartTimestamp) / 1000);
       setBreakTimerSec(Math.max(0, 1800 - used));
     }
-  }, [punchInTimestamp, breakStartTimestamp, shiftStatus]);
+  }, [punchInTimestamp, breakStartTimestamp, shiftStatus, serverTimeOffset]);
 
-  useEffect(() => {
-    EmployeeApi.attendance(session)
+  const syncAttendanceState = useCallback(() => {
+    return EmployeeApi.attendance(session)
       .then((data) => {
+        if (data.server_time) {
+          const offset = new Date(data.server_time).getTime() - Date.now();
+          setServerTimeOffset(offset);
+        }
         const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
         setShiftStatus(status);
+        setAlreadyCompletedToday(Boolean(data.already_completed_today));
+
         if (data.punch_in_time) {
           const t = new Date(data.punch_in_time).getTime();
           setPunchInTimestamp(t);
-          setElapsedSec(Math.max(0, Math.floor((Date.now() - t) / 1000)));
+          const currentServerNow = Date.now() + (data.server_time ? new Date(data.server_time).getTime() - Date.now() : 0);
+          setElapsedSec(Math.max(0, Math.floor((currentServerNow - t) / 1000)));
         }
         if (data.active_break_started_at) {
           const bt = new Date(data.active_break_started_at).getTime();
           setBreakStartTimestamp(bt);
-          const used = Math.floor((Date.now() - bt) / 1000);
+          const currentServerNow = Date.now() + (data.server_time ? new Date(data.server_time).getTime() - Date.now() : 0);
+          const used = Math.floor((currentServerNow - bt) / 1000);
           setBreakTimerSec(Math.max(0, 1800 - used));
         }
       })
       .catch((error) => Alert.alert('Sync failed', error.message));
+  }, [session]);
 
+  useEffect(() => {
+    syncAttendanceState();
     refreshReadiness(true);
     const complianceTimer = setInterval(() => refreshReadiness(true), 60_000);
     return () => clearInterval(complianceTimer);
-  }, [refreshReadiness, session]);
+  }, [syncAttendanceState, refreshReadiness]);
 
   // AppState listener: immediately re-sync server attendance & re-compute clocks when app becomes active
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
-        EmployeeApi.attendance(session)
-          .then((data) => {
-            const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
-            setShiftStatus(status);
-            if (data.punch_in_time) {
-              const t = new Date(data.punch_in_time).getTime();
-              setPunchInTimestamp(t);
-              setElapsedSec(Math.max(0, Math.floor((Date.now() - t) / 1000)));
-            }
-            if (data.active_break_started_at) {
-              const bt = new Date(data.active_break_started_at).getTime();
-              setBreakStartTimestamp(bt);
-              const used = Math.floor((Date.now() - bt) / 1000);
-              setBreakTimerSec(Math.max(0, 1800 - used));
-            }
-          })
-          .catch(() => undefined);
-
+        syncAttendanceState();
         updateClocks();
         refreshReadiness(true);
       }
     });
     return () => subscription.remove();
-  }, [session, updateClocks, refreshReadiness]);
+  }, [syncAttendanceState, updateClocks, refreshReadiness]);
 
   // Real-time ticking clock based on absolute time differences
   useEffect(() => {
@@ -117,15 +115,16 @@ export default function DutyDashboardScreen({
     return () => clearInterval(timer);
   }, [shiftStatus, updateClocks]);
 
-  // Background waypoint ping while checked in
+  // Background waypoint ping while checked in with 2-minute stall tracking
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
     const pingLocation = async () => {
       try {
         const pos = await EmployeeApi.currentPosition();
         await EmployeeApi.sendWaypoint(session, pos);
+        setLastWaypointTime(Date.now());
       } catch {
-        // Silent failure for background blips
+        // Silent failure for transient background blips
       }
     };
     pingLocation();
@@ -133,6 +132,12 @@ export default function DutyDashboardScreen({
 
     return () => clearInterval(locInterval);
   }, [shiftStatus, session]);
+
+  const isGpsStalled = Boolean(
+    shiftStatus === 'CHECKED_IN' &&
+    lastWaypointTime !== null &&
+    Date.now() - lastWaypointTime > 120_000
+  );
 
   const verifiedReadiness = async () => {
     const next = await DeviceIntegrityService.inspect({ requestPermission: true, acquirePosition: true });
@@ -150,6 +155,10 @@ export default function DutyDashboardScreen({
   };
 
   const handleCheckIn = async () => {
+    if (alreadyCompletedToday) {
+      Alert.alert('Shift limit reached', 'You have already completed your shift for today (IST limit: 1 check-in per day).');
+      return;
+    }
     setActionLoading(true);
     try {
       const verified = await verifiedReadiness();
@@ -161,6 +170,7 @@ export default function DutyDashboardScreen({
       });
       const punchTime = result.punch_in_time ? new Date(result.punch_in_time).getTime() : Date.now();
       setPunchInTimestamp(punchTime);
+      setLastWaypointTime(Date.now());
       setElapsedSec(Math.max(0, Math.floor((Date.now() - punchTime) / 1000)));
       setShiftStatus(result.status);
       Alert.alert('Shift started', 'Your location and attendance were verified.');
@@ -183,8 +193,10 @@ export default function DutyDashboardScreen({
             const position = await EmployeeApi.currentPosition();
             await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
             setShiftStatus('CHECKED_OUT');
+            setAlreadyCompletedToday(true);
             setPunchInTimestamp(null);
             setBreakStartTimestamp(null);
+            setLastWaypointTime(null);
             setElapsedSec(0);
           } catch (error: any) {
             Alert.alert('Check-out failed', error.message);
@@ -227,6 +239,7 @@ export default function DutyDashboardScreen({
       await EmployeeApi.attendance(session, 'POST', { action: 'resume', integrity: verified.telemetry });
       setShiftStatus('CHECKED_IN');
       setBreakStartTimestamp(null);
+      setLastWaypointTime(Date.now());
     } catch (error: any) {
       Alert.alert('Resume failed', error.message);
     } finally {
@@ -245,7 +258,9 @@ export default function DutyDashboardScreen({
     ? 'On duty'
     : shiftStatus === 'ON_BREAK'
       ? 'On break'
-      : 'Not checked in';
+      : alreadyCompletedToday
+        ? 'Shift completed'
+        : 'Not checked in';
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -261,16 +276,36 @@ export default function DutyDashboardScreen({
         </TouchableOpacity>
       </View>
 
+      {/* 2-Minute GPS / Mobile Internet Stalled Warning */}
+      {isGpsStalled && (
+        <View style={styles.gpsWarningCard}>
+          <Text style={styles.gpsWarningTitle}>⚠️ GPS / Location Disconnected (&gt;2 min)</Text>
+          <Text style={styles.gpsWarningText}>
+            No location update received for over 2 minutes. Ensure Location (GPS) and Mobile Internet remain ON while on duty.
+          </Text>
+        </View>
+      )}
+
       <View style={styles.statusCard}>
         <View style={styles.statusRow}>
-          <View style={[styles.statusDot, shiftStatus === 'CHECKED_IN' && styles.statusDotActive]} />
+          <View
+            style={[
+              styles.statusDot,
+              shiftStatus === 'CHECKED_IN' && styles.statusDotActive,
+              alreadyCompletedToday && styles.statusDotCompleted,
+            ]}
+          />
           <Text style={styles.statusLabel}>{statusLabel}</Text>
         </View>
         <Text style={styles.timer}>
-          {shiftStatus === 'ON_BREAK' ? formatDuration(breakTimerSec) : formatDuration(elapsedSec)}
+          {shiftStatus === 'ON_BREAK'
+            ? formatDuration(breakTimerSec)
+            : shiftStatus === 'CHECKED_IN'
+              ? formatDuration(elapsedSec)
+              : '00:00:00'}
         </Text>
         <Text style={styles.timerCaption}>
-          {shiftStatus === 'ON_BREAK' ? 'Break time remaining' : 'Shift duration'}
+          {shiftStatus === 'ON_BREAK' ? 'Break time remaining' : 'Shift duration (Server Synced)'}
         </Text>
       </View>
 
@@ -298,7 +333,19 @@ export default function DutyDashboardScreen({
         )}
       </View>
 
-      {shiftStatus === 'CHECKED_OUT' && (
+      {/* When Already Completed Today: Show Completed Card */}
+      {shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && (
+        <View style={styles.completedCard}>
+          <Text style={styles.completedIcon}>✅</Text>
+          <Text style={styles.completedTitle}>Shift Completed for Today</Text>
+          <Text style={styles.completedSubtitle}>
+            You have already completed your shift for today. Next check-in will open tomorrow (IST).
+          </Text>
+        </View>
+      )}
+
+      {/* When NOT Checked In and NOT completed: Show Check In Button */}
+      {shiftStatus === 'CHECKED_OUT' && !alreadyCompletedToday && (
         <TouchableOpacity
           style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
           onPress={handleCheckIn}
@@ -308,6 +355,7 @@ export default function DutyDashboardScreen({
         </TouchableOpacity>
       )}
 
+      {/* When Checked In: Show Break & Check Out buttons (NO Check In button) */}
       {shiftStatus === 'CHECKED_IN' && (
         <View style={styles.actionStack}>
           <TouchableOpacity style={styles.secondaryButton} onPress={handleStartBreak} disabled={actionLoading}>
@@ -319,6 +367,7 @@ export default function DutyDashboardScreen({
         </View>
       )}
 
+      {/* When On Break: Show Resume Button */}
       {shiftStatus === 'ON_BREAK' && (
         <TouchableOpacity
           style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
@@ -382,6 +431,25 @@ const styles = StyleSheet.create({
   role: { color: '#64748B', fontSize: 12, marginTop: 1 },
   logoutButton: { paddingVertical: 9, paddingHorizontal: 12 },
   logoutText: { color: '#475569', fontWeight: '700' },
+  gpsWarningCard: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  gpsWarningTitle: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  gpsWarningText: {
+    color: '#92400E',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   statusCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -393,6 +461,7 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center' },
   statusDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#94A3B8', marginRight: 8 },
   statusDotActive: { backgroundColor: '#16A34A' },
+  statusDotCompleted: { backgroundColor: '#3B82F6' },
   statusLabel: { color: '#334155', fontSize: 14, fontWeight: '800' },
   timer: { color: '#0F172A', fontSize: 38, fontWeight: '800', marginTop: 15, fontVariant: ['tabular-nums'] },
   timerCaption: { color: '#64748B', fontSize: 12, marginTop: 5 },
@@ -417,6 +486,18 @@ const styles = StyleSheet.create({
   blockerText: { color: '#9A3412', fontSize: 13, lineHeight: 20, marginTop: 8 },
   settingsButton: { alignSelf: 'flex-start', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, marginTop: 10 },
   settingsButtonText: { color: '#166534', fontSize: 12, fontWeight: '800' },
+  completedCard: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 18,
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  completedIcon: { fontSize: 28, marginBottom: 8 },
+  completedTitle: { color: '#1E40AF', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  completedSubtitle: { color: '#3B82F6', fontSize: 12, textAlign: 'center', lineHeight: 18 },
   primaryButton: {
     height: 56,
     borderRadius: 14,

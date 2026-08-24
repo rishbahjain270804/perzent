@@ -2,23 +2,29 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { authErrorResponse, requireSession } from '@/lib/auth';
 
-const startOfTodayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+export const dynamic = 'force-dynamic';
+
+const todayIst = () => {
+  const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  return new Date(`${istDateStr}T00:00:00.000Z`);
+};
 
 export async function POST(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
     const body = await request.json();
+    const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
       where: {
         user_id_work_date: {
           user_id: session.userId,
-          work_date: startOfTodayUtc(),
+          work_date: workDate,
         },
       },
     });
 
     if (!attendance || ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
-      return NextResponse.json({ error: 'No active attendance session' }, { status: 409 });
+      return NextResponse.json({ error: 'No active attendance session for today' }, { status: 409 });
     }
 
     const rawPoints = Array.isArray(body.waypoints) ? body.waypoints : [body];
@@ -52,7 +58,11 @@ export async function POST(request: Request) {
       where: { attendance_id: attendance.id },
     });
 
-    return NextResponse.json({ ingested: created.count, total_waypoints: total });
+    return NextResponse.json({
+      ingested: created.count,
+      total_waypoints: total,
+      server_time: new Date().toISOString(),
+    });
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -61,10 +71,11 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
+    const workDate = todayIst();
     const waypoints = await prisma.locationWaypoint.findMany({
       where: {
         user_id: session.userId,
-        recorded_at: { gte: startOfTodayUtc() },
+        recorded_at: { gte: workDate },
       },
       orderBy: { recorded_at: 'asc' },
     });

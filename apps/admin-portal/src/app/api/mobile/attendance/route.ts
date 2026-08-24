@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { authErrorResponse, requireSession } from '@/lib/auth';
 
-const todayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+export const dynamic = 'force-dynamic';
+
+const todayIst = () => {
+  const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  return new Date(`${istDateStr}T00:00:00.000Z`);
+};
 
 const complianceError = (integrity: any) => {
   if (!integrity || typeof integrity !== 'object') return 'Device compliance verification is required';
-  if (integrity.location_permission_granted !== true) return 'Precise location permission must be enabled';
+  if (integrity.location_permission_granted !== true) return 'Location permission must be set to "Allow all the time"';
   if (integrity.location_services_enabled !== true) return 'Location Services (GPS) must be enabled';
   if (integrity.developer_options_enabled !== false) return 'Developer Options must be disabled and verified';
   if (integrity.battery_power_save !== false) return 'Battery Saver / Power Saving mode must be disabled and verified';
@@ -18,15 +23,22 @@ const complianceError = (integrity: any) => {
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
+    const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
-      where: { user_id_work_date: { user_id: session.userId, work_date: todayUtc() } },
+      where: { user_id_work_date: { user_id: session.userId, work_date: workDate } },
       include: { breaks: { where: { end_time: null }, orderBy: { start_time: 'desc' }, take: 1 } },
     });
+
+    const isFinished = Boolean(attendance && ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status));
+
     return NextResponse.json({
       status: attendance?.status || 'CHECKED_OUT',
-      attendance_id: attendance?.id,
-      punch_in_time: attendance?.punch_in_time.toISOString(),
-      active_break_started_at: attendance?.breaks[0]?.start_time.toISOString(),
+      attendance_id: attendance?.id || null,
+      punch_in_time: attendance?.punch_in_time ? attendance.punch_in_time.toISOString() : null,
+      punch_out_time: attendance?.punch_out_time ? attendance.punch_out_time.toISOString() : null,
+      active_break_started_at: attendance?.breaks[0]?.start_time ? attendance.breaks[0].start_time.toISOString() : null,
+      already_completed_today: isFinished,
+      server_time: new Date().toISOString(),
     });
   } catch (error) {
     return authErrorResponse(error);
@@ -37,26 +49,42 @@ export async function POST(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
     const body = await request.json();
-    const workDate = todayUtc();
+    const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
       where: { user_id_work_date: { user_id: session.userId, work_date: workDate } },
       include: { breaks: { where: { end_time: null }, take: 1 } },
     });
 
     if (body.action === 'check_in') {
-      if (attendance) return NextResponse.json({ error: 'Attendance already exists for today' }, { status: 409 });
+      if (attendance) {
+        if (['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
+          return NextResponse.json({
+            error: 'You have already completed your shift for today. Only 1 check-in is permitted per calendar date (IST).',
+            already_completed_today: true,
+          }, { status: 409 });
+        }
+        return NextResponse.json({
+          error: 'You already have an active shift for today.',
+          status: attendance.status,
+          punch_in_time: attendance.punch_in_time.toISOString(),
+        }, { status: 409 });
+      }
+
       const blockedReason = complianceError(body.integrity);
       if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
       if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
         return NextResponse.json({ error: 'A verified GPS position is required' }, { status: 400 });
       }
+
+      const now = new Date();
       const created = await prisma.attendanceRecord.create({
         data: {
           user_id: session.userId,
           work_date: workDate,
-          punch_in_time: new Date(),
+          punch_in_time: now,
           punch_in_lat: body.latitude,
           punch_in_lng: body.longitude,
+          status: 'CHECKED_IN',
         },
       });
 
@@ -70,14 +98,23 @@ export async function POST(request: Request) {
           accuracy: body.accuracy || 10,
           speed: 0,
           heading: 0,
-          recorded_at: new Date(),
+          recorded_at: now,
         },
       }).catch(() => undefined);
 
-      return NextResponse.json({ status: created.status, attendance_id: created.id, punch_in_time: created.punch_in_time.toISOString() }, { status: 201 });
+      return NextResponse.json({
+        status: created.status,
+        attendance_id: created.id,
+        punch_in_time: created.punch_in_time.toISOString(),
+        server_time: now.toISOString(),
+      }, { status: 201 });
     }
+
     if (!attendance || ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
-      return NextResponse.json({ error: 'No active attendance session' }, { status: 409 });
+      return NextResponse.json({
+        error: 'No active attendance session found for today.',
+        already_completed_today: Boolean(attendance),
+      }, { status: 409 });
     }
 
     if (body.action === 'start_break') {
@@ -89,14 +126,18 @@ export async function POST(request: Request) {
         await tx.attendanceRecord.update({ where: { id: attendance.id }, data: { status: 'ON_BREAK' } });
         return created;
       });
-      return NextResponse.json({ status: 'ON_BREAK', active_break_started_at: item.start_time.toISOString() });
+      return NextResponse.json({
+        status: 'ON_BREAK',
+        active_break_started_at: item.start_time.toISOString(),
+        server_time: new Date().toISOString(),
+      });
     }
 
     if (body.action === 'resume') {
       const blockedReason = complianceError(body.integrity);
       if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
       const activeBreak = attendance.breaks[0];
-      if (!activeBreak) return NextResponse.json({ error: 'No active break' }, { status: 409 });
+      if (!activeBreak) return NextResponse.json({ error: 'No active break found' }, { status: 409 });
       const end = new Date();
       const duration = Math.max(0, Math.round((end.getTime() - activeBreak.start_time.getTime()) / 60000));
       await prisma.$transaction([
@@ -106,7 +147,10 @@ export async function POST(request: Request) {
           data: { status: 'CHECKED_IN', total_break_minutes: { increment: duration } },
         }),
       ]);
-      return NextResponse.json({ status: 'CHECKED_IN' });
+      return NextResponse.json({
+        status: 'CHECKED_IN',
+        server_time: end.toISOString(),
+      });
     }
 
     if (body.action === 'check_out') {
@@ -138,7 +182,11 @@ export async function POST(request: Request) {
           net_worked_minutes: Math.max(0, gross - breakMinutes),
         },
       });
-      return NextResponse.json({ status: 'CHECKED_OUT' });
+      return NextResponse.json({
+        status: 'CHECKED_OUT',
+        punch_out_time: end.toISOString(),
+        server_time: end.toISOString(),
+      });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

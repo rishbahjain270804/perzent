@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { authErrorResponse, requireSession } from '@/lib/auth';
 
+const getTodayIst = () => {
+  const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  return new Date(`${istDateStr}T00:00:00.000Z`);
+};
+
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+    const today = getTodayIst();
 
     const users = await prisma.user.findMany({
       where: {
@@ -32,6 +36,8 @@ export async function GET(request: Request) {
       orderBy: { full_name: 'asc' },
     });
 
+    const nowEpoch = Date.now();
+
     return NextResponse.json(users.map((user: any) => {
       const attendance = user.attendances?.[0];
       const waypoint = attendance?.waypoints?.[0];
@@ -44,6 +50,17 @@ export async function GET(request: Request) {
         : attendance.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : attendance.status;
 
       const hasPunchLocation = Number.isFinite(attendance?.punch_in_lat) && Number.isFinite(attendance?.punch_in_lng);
+      const pingDate = waypoint?.recorded_at || attendance?.punch_in_time || null;
+      const pingEpoch = pingDate ? new Date(pingDate).getTime() : 0;
+      const secondsSinceLastPing = pingEpoch > 0 ? Math.max(0, Math.floor((nowEpoch - pingEpoch) / 1000)) : null;
+
+      // 2-minute rule (120 seconds): if checked in but no waypoint in >120s, mark GPS/Location disconnected
+      const isGpsDisconnected = Boolean(
+        shiftStatus === 'CHECKED_IN' &&
+        secondsSinceLastPing !== null &&
+        secondsSinceLastPing > 120
+      );
+
       const currentLocation = waypoint ? {
         latitude: waypoint.latitude,
         longitude: waypoint.longitude,
@@ -68,6 +85,8 @@ export async function GET(request: Request) {
         designation: user.designation,
         department_name: user.department?.name || 'Unassigned',
         shift_status: shiftStatus,
+        punch_in_time: attendance?.punch_in_time ? new Date(attendance.punch_in_time).toISOString() : null,
+        punch_out_time: attendance?.punch_out_time ? new Date(attendance.punch_out_time).toISOString() : null,
         current_location: currentLocation,
         is_moving: Boolean(waypoint && waypoint.speed > 3),
         dwell_minutes: stop ? Math.round(stop.dwell_duration_seconds / 60) : 0,
@@ -75,8 +94,11 @@ export async function GET(request: Request) {
         telemetry,
         device_model: device?.device_model || 'No device bound',
         device_uuid: device?.device_uuid,
-        gps_enabled: tamper?.event_type !== 'GPS_DISABLED',
-        has_tamper_alert: Boolean(tamper),
+        gps_enabled: !isGpsDisconnected && tamper?.event_type !== 'GPS_DISABLED',
+        is_gps_disconnected: isGpsDisconnected,
+        seconds_since_last_ping: secondsSinceLastPing,
+        has_tamper_alert: Boolean(tamper) || isGpsDisconnected,
+        tamper_reason: isGpsDisconnected ? 'No GPS ping for > 2 minutes (Location or Internet off)' : tamper?.details || null,
       };
     }));
   } catch (error) {
