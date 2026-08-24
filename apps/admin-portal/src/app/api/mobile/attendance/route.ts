@@ -59,6 +59,21 @@ export async function POST(request: Request) {
           punch_in_lng: body.longitude,
         },
       });
+
+      // Create initial waypoint so live map has an active waypoint immediately
+      await prisma.locationWaypoint.create({
+        data: {
+          attendance_id: created.id,
+          user_id: session.userId,
+          latitude: body.latitude,
+          longitude: body.longitude,
+          accuracy: body.accuracy || 10,
+          speed: 0,
+          heading: 0,
+          recorded_at: new Date(),
+        },
+      }).catch(() => undefined);
+
       return NextResponse.json({ status: created.status, attendance_id: created.id, punch_in_time: created.punch_in_time.toISOString() }, { status: 201 });
     }
     if (!attendance || ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {

@@ -43,21 +43,32 @@ export async function GET(request: Request) {
         ? 'OFF_DUTY'
         : attendance.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : attendance.status;
 
+      const hasPunchLocation = Number.isFinite(attendance?.punch_in_lat) && Number.isFinite(attendance?.punch_in_lng);
+      const currentLocation = waypoint ? {
+        latitude: waypoint.latitude,
+        longitude: waypoint.longitude,
+        accuracy: waypoint.accuracy,
+        speed: waypoint.speed,
+        heading: waypoint.heading,
+        address_name: stop?.address_name || `${waypoint.latitude.toFixed(4)}°N, ${waypoint.longitude.toFixed(4)}°E`,
+        last_ping_at: waypoint.recorded_at.toISOString(),
+      } : (hasPunchLocation ? {
+        latitude: attendance.punch_in_lat,
+        longitude: attendance.punch_in_lng,
+        accuracy: 10,
+        speed: 0,
+        heading: 0,
+        address_name: 'Checked In Spot',
+        last_ping_at: attendance.punch_in_time ? new Date(attendance.punch_in_time).toISOString() : new Date().toISOString(),
+      } : undefined);
+
       return {
         user_id: user.id,
         full_name: user.full_name,
         designation: user.designation,
         department_name: user.department?.name || 'Unassigned',
         shift_status: shiftStatus,
-        current_location: waypoint ? {
-          latitude: waypoint.latitude,
-          longitude: waypoint.longitude,
-          accuracy: waypoint.accuracy,
-          speed: waypoint.speed,
-          heading: waypoint.heading,
-          address_name: stop?.address_name || 'Location unavailable',
-          last_ping_at: waypoint.recorded_at.toISOString(),
-        } : undefined,
+        current_location: currentLocation,
         is_moving: Boolean(waypoint && waypoint.speed > 3),
         dwell_minutes: stop ? Math.round(stop.dwell_duration_seconds / 60) : 0,
         battery_level: telemetry?.battery_level,

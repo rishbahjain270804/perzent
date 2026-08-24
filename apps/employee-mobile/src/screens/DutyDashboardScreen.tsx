@@ -66,8 +66,23 @@ export default function DutyDashboardScreen({
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
     const timer = setInterval(() => setElapsedSec((previous) => previous + 1), 1000);
-    return () => clearInterval(timer);
-  }, [shiftStatus]);
+
+    const pingLocation = async () => {
+      try {
+        const pos = await EmployeeApi.currentPosition();
+        await EmployeeApi.sendWaypoint(session, pos);
+      } catch {
+        // Silent failure for transient background blips
+      }
+    };
+    pingLocation();
+    const locInterval = setInterval(pingLocation, 60_000);
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(locInterval);
+    };
+  }, [shiftStatus, session]);
 
   useEffect(() => {
     if (shiftStatus !== 'ON_BREAK' || breakTimerSec <= 0) return;

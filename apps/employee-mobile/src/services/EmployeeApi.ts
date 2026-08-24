@@ -49,4 +49,22 @@ export class EmployeeApi {
       accuracy: position.coords.accuracy,
     };
   }
+
+  static async sendWaypoint(session: any, position: { latitude: number; longitude: number; accuracy?: number; speed?: number; heading?: number }) {
+    const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WAYPOINTS}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+        speed: position.speed || 0,
+        heading: position.heading || 0,
+      }),
+    });
+    return response.json();
+  }
 }
