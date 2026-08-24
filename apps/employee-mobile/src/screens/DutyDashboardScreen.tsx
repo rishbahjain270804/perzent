@@ -14,6 +14,7 @@ import {
 import { DeviceIntegrityService, WorkReadiness } from '../services/DeviceIntegrityService';
 import { EmployeeApi } from '../services/EmployeeApi';
 import { AutoUpdateService } from '../services/AutoUpdateService';
+import { ShiftNotificationService } from '../services/ShiftNotificationService';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -68,14 +69,26 @@ export default function DutyDashboardScreen({
     }
   }, [deviceInfo, session]);
 
+  const formatDuration = (totalSeconds: number) => {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '00:00:00';
+    const total = Math.floor(totalSeconds);
+    const hours = Math.floor(total / 3600).toString().padStart(2, '0');
+    const minutes = Math.floor((total % 3600) / 60).toString().padStart(2, '0');
+    const seconds = (total % 60).toString().padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  };
+
   const updateClocks = useCallback(() => {
     const currentServerNow = Date.now() + serverTimeOffset;
     if (punchInTimestamp && shiftStatus === 'CHECKED_IN') {
-      setElapsedSec(Math.max(0, Math.floor((currentServerNow - punchInTimestamp) / 1000)));
+      const sec = Math.max(0, Math.floor((currentServerNow - punchInTimestamp) / 1000));
+      setElapsedSec(sec);
+      ShiftNotificationService.updateLiveNotification(formatDuration(sec), 'CHECKED_IN');
     }
     if (breakStartTimestamp && shiftStatus === 'ON_BREAK') {
       const used = Math.floor((currentServerNow - breakStartTimestamp) / 1000);
       setBreakTimerSec(Math.max(0, 1800 - used));
+      ShiftNotificationService.updateLiveNotification(formatDuration(used), 'ON_BREAK');
     }
   }, [punchInTimestamp, breakStartTimestamp, shiftStatus, serverTimeOffset]);
 
@@ -211,8 +224,10 @@ export default function DutyDashboardScreen({
       const punchTime = result.punch_in_time ? new Date(result.punch_in_time).getTime() : Date.now();
       setPunchInTimestamp(punchTime);
       setLastWaypointTime(Date.now());
-      setElapsedSec(Math.max(0, Math.floor((Date.now() - punchTime) / 1000)));
+      const initialSec = Math.max(0, Math.floor((Date.now() - punchTime) / 1000));
+      setElapsedSec(initialSec);
       setShiftStatus(result.status);
+      ShiftNotificationService.updateLiveNotification(formatDuration(initialSec), 'CHECKED_IN');
       Alert.alert('Shift started', 'Your location and attendance were verified.');
     } catch (error: any) {
       Alert.alert('Check-in failed', error.message);
@@ -232,6 +247,7 @@ export default function DutyDashboardScreen({
           try {
             const position = await EmployeeApi.currentPosition();
             await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
+            await ShiftNotificationService.dismiss();
             setShiftStatus('CHECKED_OUT');
             setAlreadyCompletedToday(true);
             setPunchInTimestamp(null);
@@ -261,6 +277,7 @@ export default function DutyDashboardScreen({
             const bt = result.break_start_time ? new Date(result.break_start_time).getTime() : Date.now();
             setBreakStartTimestamp(bt);
             setBreakTimerSec(1800);
+            ShiftNotificationService.updateLiveNotification('00:00:00', 'ON_BREAK');
           } catch (error: any) {
             Alert.alert('Break failed', error.message);
           } finally {
@@ -280,6 +297,7 @@ export default function DutyDashboardScreen({
       setShiftStatus('CHECKED_IN');
       setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
+      ShiftNotificationService.updateLiveNotification(formatDuration(elapsedSec), 'CHECKED_IN');
     } catch (error: any) {
       Alert.alert('Resume failed', error.message);
     } finally {
