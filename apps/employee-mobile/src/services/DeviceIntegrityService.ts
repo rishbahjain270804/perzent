@@ -27,10 +27,18 @@ const nativeIntegrity = NativeModules.DeviceIntegrity as
 
 export class DeviceIntegrityService {
   static async inspect(options: { requestPermission?: boolean; acquirePosition?: boolean } = {}): Promise<WorkReadiness> {
-    const permission = options.requestPermission
-      ? await Location.requestForegroundPermissionsAsync()
-      : await Location.getForegroundPermissionsAsync();
-    const locationPermissionGranted = permission.status === 'granted';
+    let fgPermission = await Location.getForegroundPermissionsAsync();
+    if (!fgPermission.granted && options.requestPermission) {
+      fgPermission = await Location.requestForegroundPermissionsAsync();
+    }
+
+    let bgPermission = await Location.getBackgroundPermissionsAsync();
+    if (fgPermission.granted && !bgPermission.granted && options.requestPermission) {
+      bgPermission = await Location.requestBackgroundPermissionsAsync();
+    }
+
+    // Must be "Allow all the time" (granted for background)
+    const locationPermissionGranted = fgPermission.granted && bgPermission.granted;
     const locationServicesEnabled = await Location.hasServicesEnabledAsync().catch(() => false);
 
     if (Platform.OS === 'android' && !nativeIntegrity) {
@@ -48,7 +56,10 @@ export class DeviceIntegrityService {
 
     const blockers: ComplianceBlocker[] = [];
     if (!locationPermissionGranted) {
-      blockers.push({ code: 'LOCATION_PERMISSION', message: 'Allow precise location permission.' });
+      blockers.push({
+        code: 'LOCATION_PERMISSION',
+        message: 'Location permission must be set to "Allow all the time" (Always Allow).',
+      });
     }
     if (!locationServicesEnabled) {
       blockers.push({ code: 'LOCATION_SERVICES', message: 'Turn on Location Services (GPS).' });
@@ -95,6 +106,17 @@ export class DeviceIntegrityService {
     };
 
     return { ready: blockers.length === 0, blockers, position, telemetry };
+  }
+
+  static async requestAlwaysPermission() {
+    const fg = await Location.requestForegroundPermissionsAsync();
+    if (!fg.granted) {
+      return Linking.openSettings();
+    }
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (!bg.granted) {
+      return Linking.openSettings();
+    }
   }
 
   static openAppSettings() {

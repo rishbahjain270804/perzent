@@ -266,8 +266,8 @@ export default function DutyDashboardScreen({
           <Text key={blocker.code} style={styles.blockerText}>• {blocker.message}</Text>
         ))}
         {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
-          <TouchableOpacity style={styles.settingsButton} onPress={() => DeviceIntegrityService.openAppSettings()}>
-            <Text style={styles.settingsButtonText}>Open app settings</Text>
+          <TouchableOpacity style={styles.settingsButton} onPress={() => DeviceIntegrityService.requestAlwaysPermission()}>
+            <Text style={styles.settingsButtonText}>Enable "Allow all the time"</Text>
           </TouchableOpacity>
         )}
       </View>
