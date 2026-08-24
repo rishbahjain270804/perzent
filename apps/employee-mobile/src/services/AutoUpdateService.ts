@@ -1,4 +1,4 @@
-import { Linking, Platform } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import { API_CONFIG } from '../config/api';
@@ -20,10 +20,10 @@ export class AutoUpdateService {
     const version =
       Constants.expoConfig?.version ||
       Application.nativeApplicationVersion ||
-      '1.0.0';
+      '3.0.0';
     const versionCode =
       Constants.expoConfig?.android?.versionCode ||
-      (Application.nativeBuildVersion ? parseInt(Application.nativeBuildVersion, 10) : 1);
+      (Application.nativeBuildVersion ? parseInt(Application.nativeBuildVersion, 10) : 3);
     return { version, versionCode };
   }
 
@@ -49,7 +49,6 @@ export class AutoUpdateService {
           onUpdateDetected(serverInfo);
         } else if (!this.updatePrompted) {
           this.updatePrompted = true;
-          // Trigger automatic update download/install
           this.triggerInstall(serverInfo.download_url);
         }
         return serverInfo;
@@ -62,9 +61,57 @@ export class AutoUpdateService {
     }
   }
 
+  static async manualCheck(onUpdateModal?: (info: AppVersionInfo) => void) {
+    const current = this.getCurrentVersion();
+    try {
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.VERSION}`, {
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (!response.ok) {
+        Alert.alert('Update Check', `Connected to server. Current Version: v${current.version}.`);
+        return;
+      }
+      const serverInfo: AppVersionInfo = await response.json();
+      const isOutdated =
+        serverInfo.latest_version_code > current.versionCode ||
+        this.compareSemver(serverInfo.latest_version, current.version) > 0;
+
+      if (isOutdated) {
+        if (onUpdateModal) {
+          onUpdateModal(serverInfo);
+        } else {
+          Alert.alert(
+            'New Version Available!',
+            `Version ${serverInfo.latest_version} (Build #${serverInfo.latest_version_code}) is ready for download.\n\n${serverInfo.release_notes || 'Includes stability and location upgrades.'}`,
+            [
+              { text: 'Later', style: 'cancel' },
+              {
+                text: 'Download & Install',
+                style: 'default',
+                onPress: () => this.triggerInstall(serverInfo.download_url),
+              },
+            ]
+          );
+        }
+      } else {
+        Alert.alert(
+          'Up to Date!',
+          `You are running the latest version of Perzent Workforce (v${current.version} • Build #${current.versionCode}).`
+        );
+      }
+    } catch (error: any) {
+      Alert.alert(
+        'Check Complete',
+        `Current app version is v${current.version}. Server response: ${error.message || 'Ready'}`
+      );
+    }
+  }
+
   static triggerInstall(downloadUrl: string) {
-    if (!downloadUrl) return;
-    Linking.openURL(downloadUrl).catch(() => undefined);
+    const url = downloadUrl || `${API_CONFIG.BASE_URL}/api/download/apk`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Download', `Please visit ${API_CONFIG.BASE_URL}/download in your browser.`);
+    });
   }
 
   private static compareSemver(v1: string, v2: string): number {

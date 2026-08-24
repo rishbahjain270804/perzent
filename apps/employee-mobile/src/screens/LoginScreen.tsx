@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { DeviceBindingService } from '../services/DeviceBindingService';
 import { EmployeeApi } from '../services/EmployeeApi';
+import { AutoUpdateService } from '../services/AutoUpdateService';
 
 export default function LoginScreen({
   onLoginSuccess,
@@ -92,6 +93,14 @@ export default function LoginScreen({
             Device integrity and work-session signals are checked securely. Technical details are visible only to authorized management.
           </Text>
         </View>
+
+        <TouchableOpacity
+          style={styles.updateButton}
+          onPress={() => AutoUpdateService.manualCheck()}
+        >
+          <Text style={styles.updateButtonText}>🔄 Check for App Updates • v3.0.0 (Build #3)</Text>
+        </TouchableOpacity>
+
         <Text style={styles.footer}>Accounts are created by your employer.</Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -153,5 +162,19 @@ const styles = StyleSheet.create({
   },
   noticeTitle: { color: '#166534', fontSize: 14, fontWeight: '800', marginBottom: 4 },
   noticeText: { color: '#3F6212', fontSize: 13, lineHeight: 19 },
-  footer: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 18 },
+  updateButton: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  updateButtonText: {
+    color: '#166534',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  footer: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 16 },
 });

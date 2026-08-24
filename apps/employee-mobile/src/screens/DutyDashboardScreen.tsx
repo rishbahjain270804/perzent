@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { DeviceIntegrityService, WorkReadiness } from '../services/DeviceIntegrityService';
 import { EmployeeApi } from '../services/EmployeeApi';
+import { AutoUpdateService } from '../services/AutoUpdateService';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -507,6 +508,20 @@ export default function DutyDashboardScreen({
             <Text style={styles.privacyText}>
               Location is used for attendance and active-shift tracking. Device compliance details are shared only with authorized management.
             </Text>
+          </View>
+
+          {/* App Version & Manual Update Card */}
+          <View style={styles.appVersionCard}>
+            <View style={styles.appVersionInfo}>
+              <Text style={styles.appVersionTitle}>Perzent Workforce</Text>
+              <Text style={styles.appVersionSubtitle}>Version 3.0.0 (Build #3)</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.checkUpdateButton}
+              onPress={() => AutoUpdateService.manualCheck()}
+            >
+              <Text style={styles.checkUpdateButtonText}>Check for Updates</Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -1062,6 +1077,33 @@ const styles = StyleSheet.create({
   permActionText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '800',
+  },
+  appVersionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  appVersionInfo: { flex: 1, marginRight: 10 },
+  appVersionTitle: { fontSize: 13, fontWeight: '800', color: '#0F172A' },
+  appVersionSubtitle: { fontSize: 11, color: '#64748B', marginTop: 2 },
+  checkUpdateButton: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  checkUpdateButtonText: {
+    color: '#166534',
+    fontSize: 12,
     fontWeight: '800',
   },
 });
