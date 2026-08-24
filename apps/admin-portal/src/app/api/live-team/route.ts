@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const users = await prisma.user.findMany({
       where: {
         company_id: session.companyId,
-        role: 'EMPLOYEE',
+        role: session.role === 'OWNER' ? { in: ['EMPLOYEE', 'MANAGER'] } : 'EMPLOYEE',
         status: 'ACTIVE',
         ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
       },
