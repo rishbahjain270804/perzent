@@ -45,7 +45,7 @@ export default function EmployeesPage() {
   const fetchEmployees = () => {
     fetch('/api/employees')
       .then((res) => res.json())
-      .then((data) => setEmployees(data));
+      .then((data) => setEmployees(Array.isArray(data) ? data : []));
   };
 
   useEffect(() => {
@@ -145,19 +145,19 @@ export default function EmployeesPage() {
   );
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <h1 className="text-base font-bold text-white tracking-tight">Employee Directory & Seat Licenses</h1>
-          <p className="text-[11px] text-[#6B7280]">
-            Manage field representative profiles, device UUID locks, and provision seats (₹99 + 18% GST = ₹116.82)
+          <h1 className="text-sm md:text-base font-bold dashboard-strong tracking-tight">Employee Directory & Licenses</h1>
+          <p className="text-[10px] md:text-[11px] text-[#6B7280]">
+            Field profiles, hardware UUID locks, and seat provisioning (₹116.82 / seat)
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 self-start sm:self-auto">
           <button
             onClick={fetchEmployees}
-            className="p-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 hover:text-white transition"
+            className="p-1.5 rounded border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white transition"
             title="Refresh List"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -167,7 +167,7 @@ export default function EmployeesPage() {
               setPaymentStep('DETAILS');
               setShowCashfreeModal(true);
             }}
-            className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
+            className="px-2.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
           >
             <UserPlus className="w-3.5 h-3.5" /> Add Employee (₹116.82)
           </button>
@@ -175,89 +175,142 @@ export default function EmployeesPage() {
       </div>
 
       {message && (
-        <div className="p-2.5 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] text-xs font-medium">
+        <div className="p-2 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] text-xs font-medium">
           {message}
         </div>
       )}
 
       {/* 4-Cell Metric Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 border border-slate-800 bg-[#0B1120] rounded-lg divide-y md:divide-y-0 md:divide-x divide-slate-800">
-        <div className="p-3.5">
-          <span className="text-[#6B7280] text-[11px]">Total Employees</span>
-          <p className="text-xl font-bold text-white mt-1 tabular-nums">{employees.length}</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="dashboard-card p-3 rounded-lg">
+          <span className="text-[#6B7280] text-[10px] uppercase font-semibold">Total Employees</span>
+          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">{employees.length}</p>
           <span className="text-[10px] text-[#6B7280]">Enrolled personnel</span>
         </div>
-        <div className="p-3.5">
-          <span className="text-[#86EFAC] text-[11px]">Active Paid Seats</span>
-          <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">{employees.length}</p>
+        <div className="dashboard-card p-3 rounded-lg">
+          <span className="text-emerald-400 text-[10px] uppercase font-semibold">Active Paid Seats</span>
+          <p className="text-lg md:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums">{employees.length}</p>
           <span className="text-[10px] text-[#6B7280]">Cashfree authorized</span>
         </div>
-        <div className="p-3.5">
-          <span className="text-blue-400 text-[11px]">Bound Devices</span>
-          <p className="text-xl font-bold text-white mt-1 tabular-nums text-blue-400">
+        <div className="dashboard-card p-3 rounded-lg">
+          <span className="text-blue-400 text-[10px] uppercase font-semibold">Bound Devices</span>
+          <p className="text-lg md:text-xl font-bold text-blue-400 mt-0.5 tabular-nums">
             {employees.filter((e) => e.device_uuid).length}
           </p>
           <span className="text-[10px] text-[#6B7280]">Hardware UUID locked</span>
         </div>
-        <div className="p-3.5">
-          <span className="text-slate-400 text-[11px]">Base License Fee</span>
-          <p className="text-xl font-bold text-white mt-1 tabular-nums">₹99.00 <span className="text-[11px] text-slate-400 font-normal">+ 18% GST</span></p>
-          <span className="text-[10px] text-[#6B7280]">₹116.82 per seat</span>
+        <div className="dashboard-card p-3 rounded-lg">
+          <span className="text-slate-400 text-[10px] uppercase font-semibold">Base License Fee</span>
+          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">₹99.00</p>
+          <span className="text-[10px] text-[#6B7280]">₹116.82 incl. 18% GST</span>
         </div>
       </div>
 
       {/* Search Bar */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, phone, or designation..."
-            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+            placeholder="Search name, phone..."
+            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-700 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
           />
         </div>
-        <span className="text-[11px] text-[#6B7280]">{filteredEmployees.length} representatives found</span>
+        <span className="text-[10px] md:text-[11px] text-[#6B7280]">{filteredEmployees.length} reps</span>
       </div>
 
-      {/* Dense Tabular Employee Directory */}
-      <div className="border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden">
+      {/* ─── Mobile Card List ─── */}
+      <div className="md:hidden space-y-2">
+        {filteredEmployees.map((emp) => (
+          <div key={emp.id} className="dashboard-card rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px] shrink-0">
+                  {emp.full_name?.charAt(0) || 'E'}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-xs dashboard-strong truncate">{emp.full_name}</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">{emp.designation || 'Representative'}</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30 shrink-0">
+                <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid
+              </span>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-300">
+              <span className="font-mono text-[10px]">{emp.phone}</span>
+              {emp.device_uuid ? (
+                <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                  <Smartphone className="w-3 h-3" /> {emp.device_model || 'Bound'}
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500 italic">No Device</span>
+              )}
+            </div>
+
+            <div className="pt-1.5 flex justify-end gap-1.5 border-t border-slate-800/40">
+              {emp.device_uuid && (
+                <button
+                  onClick={() => handleResetDevice(emp.id)}
+                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-400" /> Reset Lock
+                </button>
+              )}
+              <Link
+                href={`/dashboard/routes?user_id=${emp.id}`}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition"
+              >
+                Trail →
+              </Link>
+            </div>
+          </div>
+        ))}
+        {filteredEmployees.length === 0 && (
+          <p className="text-center text-[#6B7280] text-[11px] py-8">No employees found.</p>
+        )}
+      </div>
+
+      {/* ─── Desktop Table ─── */}
+      <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 bg-slate-900/60 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
-                <th className="px-4 py-2.5">Representative</th>
-                <th className="px-4 py-2.5">Phone & Email</th>
-                <th className="px-4 py-2.5">Designation</th>
-                <th className="px-4 py-2.5">Role</th>
-                <th className="px-4 py-2.5">Hardware Binding</th>
-                <th className="px-4 py-2.5">Seat Status</th>
-                <th className="px-4 py-2.5 text-right">Actions</th>
+              <tr className="border-b border-slate-800 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
+                <th className="px-3 py-2">Representative</th>
+                <th className="px-3 py-2">Phone & Email</th>
+                <th className="px-3 py-2">Designation</th>
+                <th className="px-3 py-2">Role</th>
+                <th className="px-3 py-2">Hardware Binding</th>
+                <th className="px-3 py-2">Seat Status</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+            <tbody className="divide-y divide-slate-800/40">
               {filteredEmployees.map((emp) => (
-                <tr key={emp.id} className="hover:bg-slate-850/40 transition">
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
+                <tr key={emp.id} className="hover:bg-slate-800/20 transition">
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px]">
                         {emp.full_name?.charAt(0)}
                       </div>
-                      <span className="font-semibold text-white">{emp.full_name}</span>
+                      <span className="font-semibold dashboard-strong">{emp.full_name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                  <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
                     <p className="leading-tight">{emp.phone}</p>
                     <p className="text-[10px] text-[#6B7280] leading-tight">{emp.email}</p>
                   </td>
-                  <td className="px-4 py-2.5 text-slate-300">{emp.designation || 'Field Representative'}</td>
-                  <td className="px-4 py-2.5">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
+                  <td className="px-3 py-2 text-slate-300">{emp.designation || 'Representative'}</td>
+                  <td className="px-3 py-2">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
                       {emp.role}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-3 py-2">
                     {emp.device_uuid ? (
                       <div className="flex items-center gap-1.5 text-emerald-400">
                         <Smartphone className="w-3.5 h-3.5" />
@@ -270,16 +323,16 @@ export default function EmployeesPage() {
                       <span className="text-[11px] text-slate-500 italic">No Device Bound</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
+                  <td className="px-3 py-2">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
                       <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid (₹116.82)
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-right space-x-1">
+                  <td className="px-3 py-2 text-right space-x-1">
                     {emp.device_uuid && (
                       <button
                         onClick={() => handleResetDevice(emp.id)}
-                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition inline-flex items-center gap-1"
+                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center gap-1"
                         title="Unbind Device Lock"
                       >
                         <RotateCcw className="w-3 h-3 text-amber-400" /> Reset
@@ -287,7 +340,7 @@ export default function EmployeesPage() {
                     )}
                     <Link
                       href={`/dashboard/routes?user_id=${emp.id}`}
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition inline-flex items-center"
+                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center"
                     >
                       Routes
                     </Link>
@@ -301,15 +354,15 @@ export default function EmployeesPage() {
 
       {/* Minimalist Cashfree Provisioning Modal */}
       {showCashfreeModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="max-w-md w-full bg-[#0B1120] border border-slate-800 rounded-lg p-5 shadow-2xl space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div className="max-w-md w-full dashboard-card rounded-lg p-4 sm:p-5 shadow-2xl space-y-3 text-xs">
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded bg-[#16A34A] text-white font-bold flex items-center justify-center text-xs">
                   P
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-white">Provision Field Seat</h3>
+                  <h3 className="font-bold text-sm dashboard-strong">Provision Field Seat</h3>
                   <p className="text-[10px] text-[#6B7280]">Cashfree PG (₹99.00 + 18% GST)</p>
                 </div>
               </div>
@@ -322,58 +375,58 @@ export default function EmployeesPage() {
             </div>
 
             {paymentStep === 'DETAILS' && (
-              <form onSubmit={handleInitiateCashfreePayment} className="space-y-3">
+              <form onSubmit={handleInitiateCashfreePayment} className="space-y-2.5">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Full Name</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Full Name</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Ramesh Kumar"
                     value={formData.full_name}
                     onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Phone (Login)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Phone (Login)</label>
                     <input
                       type="text"
                       required
                       placeholder="+91 98765 43210"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                      className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Designation</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Designation</label>
                     <input
                       type="text"
                       required
-                      placeholder="Sales Representative"
+                      placeholder="Sales Rep"
                       value={formData.designation}
                       onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                      className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                      className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Email</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Email</label>
                   <input
                     type="email"
                     required
                     placeholder="ramesh@acmelogistics.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Temporary Password</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Temporary Password</label>
                   <input
                     type="password"
                     required
@@ -382,23 +435,23 @@ export default function EmployeesPage() {
                     placeholder="At least 8 characters"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                   />
                 </div>
 
                 {/* Price Breakdown Box */}
-                <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-1.5 text-[11px]">
+                <div className="p-2.5 rounded border border-slate-800 bg-slate-900/60 space-y-1 text-[11px]">
                   <div className="flex justify-between text-slate-300">
                     <span>Base Seat Fee:</span>
                     <span className="font-mono">₹{EMPLOYEE_BASE_PRICE_INR.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-[#86EFAC]">
+                  <div className="flex justify-between text-emerald-400">
                     <span>18% GST:</span>
                     <span className="font-mono">+₹{GST_AMOUNT_INR.toFixed(2)}</span>
                   </div>
-                  <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs text-white">
-                    <span>Total Amount Payable:</span>
-                    <span className="text-[#86EFAC] font-mono">₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}</span>
+                  <div className="pt-1 border-t border-slate-800 flex justify-between font-bold text-xs">
+                    <span>Total Payable:</span>
+                    <span className="text-emerald-400 font-mono">₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -413,7 +466,7 @@ export default function EmployeesPage() {
                   <button
                     type="submit"
                     disabled={processingPayment}
-                    className="px-4 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
+                    className="px-3.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
                   >
                     {processingPayment ? 'Connecting...' : 'Authorize & Pay ₹116.82'}
                   </button>
@@ -423,14 +476,14 @@ export default function EmployeesPage() {
 
             {paymentStep === 'CHECKOUT' && currentOrder && (
               <div className="space-y-3">
-                <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-1 font-mono text-[11px]">
+                <div className="p-2.5 rounded border border-slate-800 bg-slate-900/60 space-y-1 font-mono text-[11px]">
                   <div className="flex justify-between text-slate-400">
                     <span>Cashfree Order:</span>
-                    <span className="text-white truncate max-w-[200px]">{currentOrder.order_id}</span>
+                    <span className="text-white truncate max-w-[180px]">{currentOrder.order_id}</span>
                   </div>
                   <div className="flex justify-between text-slate-400">
                     <span>Amount:</span>
-                    <span className="font-bold text-[#86EFAC]">₹{currentOrder.order_amount?.toFixed(2)}</span>
+                    <span className="font-bold text-emerald-400">₹{currentOrder.order_amount?.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -447,9 +500,9 @@ export default function EmployeesPage() {
                   <button
                     onClick={handleCompleteCashfreePayment}
                     disabled={processingPayment}
-                    className="px-4 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
+                    className="px-3.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
                   >
-                    {processingPayment ? 'Verifying...' : `Pay ₹${EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)} via Cashfree`}
+                    {processingPayment ? 'Verifying...' : `Pay ₹${EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}`}
                   </button>
                 </div>
               </div>
@@ -457,19 +510,19 @@ export default function EmployeesPage() {
 
             {paymentStep === 'SUCCESS' && lastInvoice && (
               <div className="space-y-3 text-center py-2">
-                <div className="w-10 h-10 rounded-full bg-[#16A34A]/20 text-[#16A34A] mx-auto flex items-center justify-center">
-                  <CheckCircle2 className="w-6 h-6 text-[#16A34A]" />
+                <div className="w-9 h-9 rounded-full bg-[#16A34A]/20 text-[#16A34A] mx-auto flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5 text-[#16A34A]" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-sm text-white">Employee Seat Provisioned!</h4>
-                  <p className="text-[11px] text-[#6B7280] mt-0.5">
-                    Invoice <span className="font-mono text-white">{lastInvoice.invoice_number}</span> recorded
+                  <h4 className="font-bold text-sm dashboard-strong">Employee Seat Provisioned!</h4>
+                  <p className="text-[10px] text-[#6B7280] mt-0.5">
+                    Invoice <span className="font-mono text-slate-200">{lastInvoice.invoice_number}</span> recorded
                   </p>
                 </div>
                 <div className="pt-2 flex justify-center gap-2">
                   <button
                     onClick={() => setShowCashfreeModal(false)}
-                    className="px-4 py-1.5 rounded bg-[#16A34A] text-white text-xs font-semibold"
+                    className="px-3.5 py-1.5 rounded bg-[#16A34A] text-white text-xs font-semibold"
                   >
                     Done
                   </button>

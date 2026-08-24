@@ -251,7 +251,7 @@ export default function LiveMapPage() {
   };
 
   return (
-    <div className="map-page space-y-4 max-w-[1600px] mx-auto text-slate-900">
+    <div className="map-page space-y-4 max-w-[1600px] mx-auto text-slate-900 pb-16 md:pb-0">
       <section className="map-toolbar">
         <div>
           <div className="flex items-center gap-2">

@@ -51,6 +51,10 @@ body {
 
 .dashboard-divider { border-color: var(--dash-border); }
 .dashboard-strong { color: var(--dash-text); }
+.dashboard-card {
+  background: var(--dash-surface);
+  border: 1px solid var(--dash-border);
+}
 
 .dashboard-nav-link {
   color: var(--dash-muted);

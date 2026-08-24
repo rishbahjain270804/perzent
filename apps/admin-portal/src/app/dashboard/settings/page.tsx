@@ -49,30 +49,30 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-4xl space-y-4 mx-auto text-xs">
+    <div className="max-w-4xl space-y-3 md:space-y-4 mx-auto text-xs pb-16 md:pb-0">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-base font-bold text-white tracking-tight">Organization Policies & Automation Rules</h1>
-          <p className="text-[11px] text-[#6B7280]">
-            Configure saved attendance, break, and storage policy values
+          <h1 className="text-sm md:text-base font-bold dashboard-strong tracking-tight">Organization Policies & Rules</h1>
+          <p className="text-[10px] md:text-[11px] text-[#6B7280]">
+            Attendance auto-cutoff, break limits, and data retention rules
           </p>
         </div>
       </div>
 
       {saved && (
-        <div className="p-2.5 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] font-medium flex items-center gap-2">
+        <div className="p-2 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] font-medium flex items-center gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" /> Policy values saved successfully.
         </div>
       )}
-      {error && <div className="p-2.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}
+      {error && <div className="p-2 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}
 
-      <form onSubmit={handleSave} className="space-y-4">
+      <form onSubmit={handleSave} className="space-y-3">
         {/* Policy Section 1: Auto Cutoff */}
-        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+        <div className="p-3.5 rounded-lg dashboard-card space-y-2.5">
           <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
             <Clock className="w-4 h-4 text-[#16A34A]" />
-            <h3 className="font-bold text-xs text-white">Daily Auto Check-Out Rule</h3>
+            <h3 className="font-bold text-xs dashboard-strong">Daily Auto Check-Out Rule</h3>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -84,7 +84,7 @@ export default function SettingsPage() {
                 type="time"
                 value={settings.auto_checkout_time}
                 onChange={(e) => setSettings({ ...settings, auto_checkout_time: e.target.value })}
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white font-mono text-xs focus:border-[#16A34A] focus:outline-none"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white font-mono text-xs focus:border-[#16A34A] focus:outline-none"
               />
               <p className="text-[10px] text-[#6B7280] mt-1">Default: 11:40 PM IST nightly cutoff</p>
             </div>
@@ -94,7 +94,7 @@ export default function SettingsPage() {
                 type="text"
                 disabled
                 value="(GMT+5:30) Asia/Kolkata (IST)"
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
               />
               <p className="text-[10px] text-[#6B7280] mt-1">System clock reference</p>
             </div>
@@ -102,10 +102,10 @@ export default function SettingsPage() {
         </div>
 
         {/* Policy Section 2: Breaks */}
-        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+        <div className="p-3.5 rounded-lg dashboard-card space-y-2.5">
           <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
             <Coffee className="w-4 h-4 text-amber-400" />
-            <h3 className="font-bold text-xs text-white">Lunch & Break Duration Cap</h3>
+            <h3 className="font-bold text-xs dashboard-strong">Lunch & Break Duration Cap</h3>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -116,7 +116,7 @@ export default function SettingsPage() {
               <select
                 value={settings.max_break_minutes}
                 onChange={(e) => setSettings({ ...settings, max_break_minutes: parseInt(e.target.value) })}
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs focus:border-[#16A34A] focus:outline-none"
               >
                 <option value={15}>15 Minutes</option>
                 <option value={30}>30 Minutes (Recommended)</option>
@@ -130,17 +130,17 @@ export default function SettingsPage() {
                 type="text"
                 disabled
                 value="Auto GPS Paused During Break"
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs"
               />
             </div>
           </div>
         </div>
 
         {/* Policy Section 3: Data Retention */}
-        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+        <div className="p-3.5 rounded-lg dashboard-card space-y-2.5">
           <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
             <Database className="w-4 h-4 text-blue-400" />
-            <h3 className="font-bold text-xs text-white">Data Retention Policy</h3>
+            <h3 className="font-bold text-xs dashboard-strong">Data Retention Policy</h3>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -152,7 +152,7 @@ export default function SettingsPage() {
                 type="text"
                 disabled
                 value="15 Days Rolling Retention"
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
               />
             </div>
             <div>
@@ -163,7 +163,7 @@ export default function SettingsPage() {
                 type="text"
                 disabled
                 value="45 Days Full Audit Trail"
-                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+                className="w-full px-2.5 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
               />
             </div>
           </div>
