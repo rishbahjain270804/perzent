@@ -8,10 +8,10 @@ import {
   EMPLOYEE_TOTAL_PRICE_INR,
 } from '@perzent/shared-types';
 
-const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || 'TEST_CF_APP_PERZENT_SANDBOX';
-const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || 'TEST_CF_SECRET_PERZENT_SANDBOX';
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || '';
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || '';
 const CASHFREE_ENV = process.env.CASHFREE_ENV || 'sandbox'; // 'sandbox' | 'production'
-const CASHFREE_API_VERSION = '2023-08-01';
+const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2023-08-01';
 
 const BASE_URL =
   CASHFREE_ENV === 'production'
