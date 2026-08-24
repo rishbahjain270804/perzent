@@ -26,5 +26,6 @@ export const API_CONFIG = {
     PAYMENTS_TRANSACTIONS: '/api/payments/transactions',
     MOBILE_ATTENDANCE: '/api/mobile/attendance',
     WAYPOINTS: '/api/mobile/waypoints',
+    VERSION: '/api/mobile/version',
   },
 };
