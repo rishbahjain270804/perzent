@@ -20,7 +20,7 @@ The system is now a credible backend foundation, but it is **not production-read
 | Employee login | Real API login, bearer session, secure local storage, device binding | 3/5 |
 | Attendance | Check-in, break, resume, check-out persist with foreground GPS | 3/5 |
 | Route tracking | Schema and playback exist; no mobile waypoint ingestion/background task | 1/5 |
-| Live map | Latest-point API exists; screen is not a geographic map | 1/5 |
+| Live map | Real OSM map, all-employee live view, hover cards, and per-employee day trail; ingestion/staleness still missing | 3/5 |
 | Device telemetry | UI values are simulated and not native readings | 1/5 |
 | Payments | Order, hosted checkout, server verification, signed webhook, ledger | 3/5 |
 | Billing/invoices | Ledger summary only; invoice download is not implemented | 1/5 |
@@ -47,6 +47,10 @@ The system is now a credible backend foundation, but it is **not production-read
 - Removed the fake APK response and disabled download until a signed artifact URL is configured.
 - Removed background-location permissions while background collection is not implemented.
 - Changed unsupported marketing claims and labeled device diagnostics as simulated.
+- Replaced the decorative live-map canvas with a real Leaflet/OpenStreetMap view.
+- Made the owner map default to all employees, with animated status dots and hover details.
+- Added per-employee full-day route playback with timestamped points, stops, start, and end markers.
+- Made the owner dashboard light by default and retained an explicit persistent dark-theme toggle.
 
 ## Owner and manager audit
 
@@ -71,10 +75,13 @@ Still wrong or incomplete:
 What works now:
 
 - Live-team data is company-scoped and derives status from stored attendance/device/location records.
+- The default live view plots every employee that has a stored current position on a real geographic map.
+- Hovering a roster entry or live dot reveals status, location, last ping, accuracy, and battery details.
+- Selecting an employee opens their chosen day as a route line with individual points and recorded stops.
+- Empty states now say when no GPS data has been uploaded instead of rendering a fake position.
 
 Still wrong or incomplete:
 
-- The “live map” is a styled grid, not Leaflet or another geographic map.
 - No employee route pings are uploaded, so new accounts will not produce live coordinates or route history.
 - There is no stale-location threshold. An old point can appear current without a clear offline/stale state.
 - Polling every 6–10 seconds does not make the data real-time; Supabase Realtime or a controlled polling/SSE design is still needed.
@@ -256,7 +263,7 @@ Open findings:
 3. Connect anti-spoof, filtering, and dwell detection to ingestion; stop claiming road snapping unless an actual road-matching service is added.
 4. Implement monitored server jobs for auto-checkout, break caps, session cleanup, and retention—or remove those controls entirely.
 5. Run Cashfree sandbox and production end-to-end tests, domain whitelisting, webhook replay/idempotency, refund behavior, and real invoice generation.
-6. Replace the fake map canvas with a real map and explicit live/stale/offline states.
+6. Add explicit fresh/stale/offline thresholds to the real map and verify marker behavior at operational scale.
 7. Publish a real signed APK through EAS/Play internal testing and configure the artifact URL.
 
 ### P1 — pilot quality

@@ -1,28 +1,31 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  LayoutDashboard,
-  MapPin,
-  Route,
   CalendarCheck,
-  Users,
-  Settings,
+  LayoutDashboard,
   LogOut,
-  ShieldCheck,
-  Clock,
-  Coffee,
+  MapPin,
+  Moon,
   Receipt,
+  Route,
+  Settings,
   Smartphone,
+  Sun,
+  Users,
 } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
+    const savedTheme = localStorage.getItem('perzent_theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') setTheme(savedTheme);
     fetch('/api/auth', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error('Unauthenticated');
@@ -47,28 +50,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.replace('/login');
   };
 
+  const toggleTheme = () => {
+    setTheme((current) => {
+      const next = current === 'light' ? 'dark' : 'light';
+      localStorage.setItem('perzent_theme', next);
+      return next;
+    });
+  };
+
   if (!session) {
-    return <div className="min-h-screen bg-[#0F172A] text-slate-400 grid place-items-center">Loading workspace…</div>;
+    return <div className="min-h-screen bg-slate-50 text-slate-500 grid place-items-center">Loading workspace…</div>;
   }
 
   return (
-    <div className="min-h-screen flex bg-[#0F172A] text-slate-100 font-sans antialiased text-xs">
-      {/* Minimalist Flat Sidebar */}
-      <aside className="w-56 bg-[#0B1120] border-r border-slate-800/80 flex flex-col justify-between shrink-0">
+    <div className="dashboard-shell min-h-screen flex font-sans antialiased text-xs" data-theme={theme}>
+      <aside className="dashboard-sidebar w-56 border-r flex flex-col justify-between shrink-0">
         <div>
-          {/* Brand Header */}
-          <div className="h-14 px-4 border-b border-slate-800/80 flex items-center gap-2.5">
-            {/* Primary Logo: White on Green (#16A34A) */}
-            <div className="w-7 h-7 rounded-md bg-[#16A34A] flex items-center justify-center font-bold text-sm text-white shrink-0">
-              P
-            </div>
+          <div className="h-14 px-4 border-b dashboard-divider flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-[#16A34A] flex items-center justify-center font-bold text-sm text-white shrink-0">P</div>
             <div className="flex flex-col">
-              <span className="font-bold text-sm tracking-tight text-white leading-none">PERZENT</span>
-              <span className="text-[10px] text-[#6B7280] leading-tight mt-0.5">Enterprise Fleet</span>
+              <span className="dashboard-strong font-bold text-sm tracking-tight leading-none">PERZENT</span>
+              <span className="text-[10px] text-[#6B7280] leading-tight mt-0.5">Workforce operations</span>
             </div>
           </div>
 
-          {/* Navigation links */}
           <nav className="p-2 space-y-0.5">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -78,9 +83,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   key={item.href}
                   href={item.href}
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition ${
-                    isActive
-                      ? 'bg-[#16A34A] text-white font-semibold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    isActive ? 'bg-[#16A34A] text-white font-semibold shadow-sm' : 'dashboard-nav-link'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -91,52 +94,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </nav>
         </div>
 
-        {/* Footer User Info */}
-        <div className="p-3 border-t border-slate-800/80 space-y-2">
+        <div className="p-3 border-t dashboard-divider space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 overflow-hidden">
-              <div className="w-6 h-6 rounded bg-white text-[#111827] font-bold text-xs flex items-center justify-center shrink-0">
-                {session?.full_name?.charAt(0) || 'U'}
+              <div className="dashboard-avatar w-7 h-7 rounded font-bold text-xs flex items-center justify-center shrink-0">
+                {session.full_name?.charAt(0) || 'U'}
               </div>
               <div className="truncate">
-                <p className="font-semibold text-[11px] text-white truncate leading-tight">{session?.full_name || 'Rajesh Sharma'}</p>
-                <p className="text-[10px] text-[#6B7280] leading-tight">{session?.role || 'OWNER'}</p>
+                <p className="dashboard-strong font-semibold text-[11px] truncate leading-tight">{session.full_name}</p>
+                <p className="text-[10px] text-[#6B7280] leading-tight">{session.role}</p>
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              title="Sign Out"
-              className="p-1 rounded text-slate-500 hover:text-red-400 transition"
-            >
+            <button onClick={handleLogout} title="Sign out" className="p-1.5 rounded text-slate-500 hover:text-red-500 transition">
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Minimal Header */}
-        <header className="h-14 px-6 bg-[#0B1120] border-b border-slate-800/80 flex items-center justify-between shrink-0">
+        <header className="dashboard-topbar h-14 px-6 border-b flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-[#6B7280]">Workspace:</span>
-            <span className="font-medium text-white">{session?.company_name || 'Acme Logistics Pvt Ltd'}</span>
+            <span className="text-[#6B7280]">Workspace</span>
+            <span className="dashboard-strong font-semibold">{session.company_name}</span>
           </div>
-
-          <div className="flex items-center gap-3 text-[11px] text-[#6B7280]">
-            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-slate-800 bg-slate-900/60 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]"></span>
-              Auto-Cutoff: 11:40 PM IST
-            </span>
-            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-slate-800 bg-slate-900/60 text-slate-300">
-              <Coffee className="w-3 h-3 text-amber-400" />
-              Lunch: 30m Cap
-            </span>
-          </div>
+          <button onClick={toggleTheme} className="dashboard-theme-toggle" title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>
+            {theme === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+            {theme === 'light' ? 'Dark' : 'Light'} theme
+          </button>
         </header>
 
-        {/* Page Content */}
-        <main className="flex-1 p-6 overflow-y-auto bg-[#0F172A]">{children}</main>
+        <main className="dashboard-content flex-1 p-6 overflow-y-auto">{children}</main>
       </div>
     </div>
   );
