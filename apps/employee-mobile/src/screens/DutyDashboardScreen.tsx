@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  AppState,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,6 +23,8 @@ export default function DutyDashboardScreen({
   onLogout: () => void;
 }) {
   const [shiftStatus, setShiftStatus] = useState<ShiftStatus>('CHECKED_OUT');
+  const [punchInTimestamp, setPunchInTimestamp] = useState<number | null>(null);
+  const [breakStartTimestamp, setBreakStartTimestamp] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [breakTimerSec, setBreakTimerSec] = useState(1800);
   const [readiness, setReadiness] = useState<WorkReadiness | null>(null);
@@ -43,16 +46,30 @@ export default function DutyDashboardScreen({
     }
   }, [deviceInfo, session]);
 
+  const updateClocks = useCallback(() => {
+    if (punchInTimestamp && shiftStatus === 'CHECKED_IN') {
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - punchInTimestamp) / 1000)));
+    }
+    if (breakStartTimestamp && shiftStatus === 'ON_BREAK') {
+      const used = Math.floor((Date.now() - breakStartTimestamp) / 1000);
+      setBreakTimerSec(Math.max(0, 1800 - used));
+    }
+  }, [punchInTimestamp, breakStartTimestamp, shiftStatus]);
+
   useEffect(() => {
     EmployeeApi.attendance(session)
       .then((data) => {
         const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
         setShiftStatus(status);
         if (data.punch_in_time) {
-          setElapsedSec(Math.max(0, Math.floor((Date.now() - new Date(data.punch_in_time).getTime()) / 1000)));
+          const t = new Date(data.punch_in_time).getTime();
+          setPunchInTimestamp(t);
+          setElapsedSec(Math.max(0, Math.floor((Date.now() - t) / 1000)));
         }
         if (data.active_break_started_at) {
-          const used = Math.floor((Date.now() - new Date(data.active_break_started_at).getTime()) / 1000);
+          const bt = new Date(data.active_break_started_at).getTime();
+          setBreakStartTimestamp(bt);
+          const used = Math.floor((Date.now() - bt) / 1000);
           setBreakTimerSec(Math.max(0, 1800 - used));
         }
       })
@@ -63,32 +80,41 @@ export default function DutyDashboardScreen({
     return () => clearInterval(complianceTimer);
   }, [refreshReadiness, session]);
 
+  // AppState listener: immediately re-compute clocks when app moves from background to active
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        updateClocks();
+        refreshReadiness(true);
+      }
+    });
+    return () => subscription.remove();
+  }, [updateClocks, refreshReadiness]);
+
+  // Real-time ticking clock based on absolute time differences
+  useEffect(() => {
+    if (shiftStatus !== 'CHECKED_IN' && shiftStatus !== 'ON_BREAK') return;
+    updateClocks();
+    const timer = setInterval(updateClocks, 1000);
+    return () => clearInterval(timer);
+  }, [shiftStatus, updateClocks]);
+
+  // Background waypoint ping while checked in
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
-    const timer = setInterval(() => setElapsedSec((previous) => previous + 1), 1000);
-
     const pingLocation = async () => {
       try {
         const pos = await EmployeeApi.currentPosition();
         await EmployeeApi.sendWaypoint(session, pos);
       } catch {
-        // Silent failure for transient background blips
+        // Silent failure for background blips
       }
     };
     pingLocation();
     const locInterval = setInterval(pingLocation, 60_000);
 
-    return () => {
-      clearInterval(timer);
-      clearInterval(locInterval);
-    };
+    return () => clearInterval(locInterval);
   }, [shiftStatus, session]);
-
-  useEffect(() => {
-    if (shiftStatus !== 'ON_BREAK' || breakTimerSec <= 0) return;
-    const timer = setInterval(() => setBreakTimerSec((previous) => Math.max(0, previous - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [shiftStatus, breakTimerSec]);
 
   const verifiedReadiness = async () => {
     const next = await DeviceIntegrityService.inspect({ requestPermission: true, acquirePosition: true });
