@@ -73,7 +73,7 @@ export default function LiveMapPage() {
         <div>
           <h1 className="text-base font-bold text-white tracking-tight">Live Fleet Map & Device Matrix</h1>
           <p className="text-[11px] text-[#6B7280]">
-            Continuous GPS coordinates • Live Sound, Brightness, Storage, RAM & Battery telemetry • Updated {lastRefreshed}
+            Latest stored GPS coordinates and device status • Updated {lastRefreshed}
           </p>
         </div>
         <button

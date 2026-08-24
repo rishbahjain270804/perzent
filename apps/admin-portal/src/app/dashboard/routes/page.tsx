@@ -78,7 +78,7 @@ export default function RoutePlaybackPage() {
         <div>
           <h1 className="text-base font-bold text-white tracking-tight">15-Day Route Playback & Dwell Stops</h1>
           <p className="text-[11px] text-[#6B7280]">
-            Road-snapped breadcrumbs • Dwell time analysis • 2-minute GPS waypoints
+            Recorded GPS breadcrumbs • Dwell time analysis • Daily route history
           </p>
         </div>
 

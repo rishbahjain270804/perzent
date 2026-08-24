@@ -8,12 +8,7 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "UIBackgroundModes": [
-          "location",
-          "fetch"
-        ],
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Perzent requires continuous background location during active work shifts to record field routes and client visit dwell times.",
-        "NSLocationWhenInUseUsageDescription": "Perzent requires your location to stamp shift check-in and check-out coordinates."
+        "NSLocationWhenInUseUsageDescription": "Perzent uses your location to stamp shift check-in and check-out coordinates."
       }
     },
     "android": {
@@ -21,11 +16,7 @@
       "versionCode": 1,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION",
-        "RECEIVE_BOOT_COMPLETED"
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "plugins": [

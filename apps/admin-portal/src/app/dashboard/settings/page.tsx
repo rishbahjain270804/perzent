@@ -55,14 +55,14 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-base font-bold text-white tracking-tight">Organization Policies & Automation Rules</h1>
           <p className="text-[11px] text-[#6B7280]">
-            Configure daily shift cutoff cutoffs, break duration caps, and storage retention policies
+            Configure saved attendance, break, and storage policy values
           </p>
         </div>
       </div>
 
       {saved && (
         <div className="p-2.5 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] font-medium flex items-center gap-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" /> Policies successfully updated and applied across fleet.
+          <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" /> Policy values saved successfully.
         </div>
       )}
       {error && <div className="p-2.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}

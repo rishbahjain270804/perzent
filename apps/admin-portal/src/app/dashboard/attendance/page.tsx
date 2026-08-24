@@ -98,7 +98,7 @@ export default function AttendancePage() {
         <div>
           <h1 className="text-base font-bold text-white tracking-tight">Attendance & Break Timesheets</h1>
           <p className="text-[11px] text-[#6B7280]">
-            45-day auditable records • Gross vs Net work hours • Lunch break deductions • 11:40 PM auto-cutoff
+            Auditable records • Gross vs net work hours • Recorded break deductions
           </p>
         </div>
         <div className="flex items-center gap-2">

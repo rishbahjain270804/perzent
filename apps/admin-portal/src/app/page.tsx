@@ -42,7 +42,7 @@ export default function LandingPage() {
             Minimalist workforce tracking with <span className="text-[#16A34A]">live device telemetry</span>
           </h1>
           <p className="text-xs text-[#6B7280] leading-relaxed">
-            Sub-meter GPS tracking • Live Sound, Brightness, Storage, RAM & Battery monitoring • 2-minute intelligent dwell filtering • Cashfree PG per-seat billing (₹99 + 18% GST).
+            GPS-stamped attendance • Tenant-isolated workforce records • Route history foundation • Cashfree PG per-seat billing (₹99 + 18% GST).
           </p>
         </div>
 
@@ -81,7 +81,7 @@ export default function LandingPage() {
             <MapPin className="w-4 h-4 text-[#86EFAC]" />
             <h3 className="font-semibold text-xs text-white">15-Day Route History</h3>
             <p className="text-[11px] text-[#6B7280] leading-normal">
-              Minute-by-minute scrubber with verified dwell stop pins and road-snapped polylines.
+              Playback for recorded waypoints and verified dwell stops once route capture is enabled.
             </p>
           </div>
 
@@ -89,7 +89,7 @@ export default function LandingPage() {
             <Clock className="w-4 h-4 text-amber-400" />
             <h3 className="font-semibold text-xs text-white">45-Day Attendance</h3>
             <p className="text-[11px] text-[#6B7280] leading-normal">
-              Gross vs net hours, 30-min lunch auto-timer, and 11:40 PM daily cutoff.
+              Gross vs net hours, recorded breaks, and configurable attendance policies.
             </p>
           </div>
 

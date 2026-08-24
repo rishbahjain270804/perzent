@@ -12,11 +12,11 @@ export async function GET() {
       owner_admin_route: 'https://perzent.jspcoders.codes/owner-admin',
     },
     features: {
-      gps_tracking: '2-Minute Intelligent Dwell-Time Filtering',
-      hardware_telemetry: ['Sound Mode/Volume', 'Brightness', 'Storage GB', 'RAM Pressure', 'Live Battery'],
+      gps_tracking: 'GPS-stamped attendance; background route capture pending',
+      hardware_telemetry: 'Schema ready; native collection pending',
       payment_gateway: 'Cashfree PG v3 (₹99 + 18% GST = ₹116.82/seat)',
       anti_tamper: 'Hardware UUID Single Device Lock',
-      policy_auto_checkout: '11:40 PM IST Daily',
+      policy_auto_checkout: 'Configurable; scheduler pending',
     },
     endpoints: {
       live_team: '/api/live-team',

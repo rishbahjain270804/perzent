@@ -8,12 +8,11 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
-import { LocationTrackingService } from '../services/LocationTrackingService';
 import { DeviceTelemetryService } from '../services/DeviceTelemetryService';
 import { DeviceTelemetry, SoundMode } from '@perzent/shared-types';
 import { EmployeeApi } from '../services/EmployeeApi';
 
-export default function DutyDashboardScreen({ session, deviceInfo }: { session: any; deviceInfo: any }) {
+export default function DutyDashboardScreen({ session, deviceInfo, onLogout }: { session: any; deviceInfo: any; onLogout: () => void }) {
   const [shiftStatus, setShiftStatus] = useState<'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK'>('CHECKED_OUT');
   const [gpsHardwareOn, setGpsHardwareOn] = useState(true);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -84,7 +83,6 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
       setGpsHardwareOn(true);
       setElapsedSec(0);
       setShiftStatus(result.status);
-      LocationTrackingService.startTracking();
       Alert.alert('Shift Started', 'Attendance was recorded successfully.');
     } catch (error: any) {
       setGpsHardwareOn(false);
@@ -111,7 +109,6 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
               const position = await EmployeeApi.currentPosition();
               await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
               setShiftStatus('CHECKED_OUT');
-              LocationTrackingService.stopTracking();
             } catch (error: any) {
               Alert.alert('Check-Out Failed', error.message);
             }
@@ -134,7 +131,6 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
               await EmployeeApi.attendance(session, 'POST', { action: 'start_break' });
               setShiftStatus('ON_BREAK');
               setBreakTimerSec(1800);
-              LocationTrackingService.pauseTracking();
             } catch (error: any) {
               Alert.alert('Break Failed', error.message);
             }
@@ -152,7 +148,6 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
     try {
       await EmployeeApi.attendance(session, 'POST', { action: 'resume' });
       setShiftStatus('CHECKED_IN');
-      LocationTrackingService.resumeTracking();
     } catch (error: any) {
       Alert.alert('Resume Failed', error.message);
     }
@@ -204,6 +199,9 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
               {telemetry.battery_status === 'CHARGING' ? '⚡' : '🔋'} {telemetry.battery_level}%
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.badge} onPress={onLogout}>
+            <Text style={styles.badgeText}>SIGN OUT</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -242,7 +240,7 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
 
                 <View style={styles.trackingPill}>
                   <Text style={styles.trackingPillText}>
-                    🛰️ Precision 2-Min Smart GPS Active • Hardware Telemetry Synced
+                    GPS-verified attendance active
                   </Text>
                 </View>
 
@@ -292,7 +290,7 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
             onPress={() => setActiveTab('TELEMETRY')}
           >
             <View style={styles.glanceHeader}>
-              <Text style={styles.glanceTitle}>📱 DEVICE TELEMETRY STREAMING LIVE</Text>
+            <Text style={styles.glanceTitle}>📱 DEVICE DIAGNOSTICS PREVIEW (SIMULATED)</Text>
               <Text style={styles.glanceLink}>Manage ➔</Text>
             </View>
             <View style={styles.glanceGrid}>
@@ -327,7 +325,6 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
           {/* Automation Rules */}
           <View style={styles.infoCard}>
             <Text style={styles.infoHeading}>SYSTEM AUTOMATION POLICIES:</Text>
-            <Text style={styles.infoItem}>🌙 11:40 PM IST: Nightly Auto-Checkout</Text>
             <Text style={styles.infoItem}>☕ 30-Min Lunch Break: Tracking Paused</Text>
             <Text style={styles.infoItem}>📍 Stationary Mode: Merged into Single Stop</Text>
             <Text style={styles.infoItem}>🔒 Single Device Bound: {deviceInfo?.device_uuid}</Text>
@@ -340,14 +337,14 @@ export default function DutyDashboardScreen({ session, deviceInfo }: { session: 
           <View style={styles.telemetryHeaderCard}>
             <View style={styles.telemetryHeaderRow}>
               <View>
-                <Text style={styles.telemetryHeaderTitle}>Device Live Hardware Status</Text>
+            <Text style={styles.telemetryHeaderTitle}>Device Diagnostics Preview</Text>
                 <Text style={styles.telemetryHeaderSub}>
                   {deviceInfo?.device_model} • {deviceInfo?.os_version}
                 </Text>
               </View>
               <View style={styles.livePulseBadge}>
                 <View style={styles.livePulseDot} />
-                <Text style={styles.livePulseText}>LIVE</Text>
+                <Text style={styles.livePulseText}>DEMO</Text>
               </View>
             </View>
           </View>

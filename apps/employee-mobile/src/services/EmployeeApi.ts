@@ -2,6 +2,13 @@ import * as Location from 'expo-location';
 import { API_CONFIG } from '../config/api';
 
 export class EmployeeApi {
+  static async logout(session: any) {
+    await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.AUTH_LOGIN}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+  }
+
   static async login(phone: string, password: string, device: any) {
     const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.AUTH_LOGIN}`, {
       method: 'POST',

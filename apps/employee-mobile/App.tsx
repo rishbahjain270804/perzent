@@ -10,6 +10,7 @@ import {
 import LoginScreen from './src/screens/LoginScreen';
 import DutyDashboardScreen from './src/screens/DutyDashboardScreen';
 import { DeviceBindingService } from './src/services/DeviceBindingService';
+import { EmployeeApi } from './src/services/EmployeeApi';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -39,7 +40,15 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#090d16" />
       {session ? (
-        <DutyDashboardScreen session={session} deviceInfo={deviceInfo} />
+        <DutyDashboardScreen
+          session={session}
+          deviceInfo={deviceInfo}
+          onLogout={async () => {
+            await EmployeeApi.logout(session).catch(() => undefined);
+            await DeviceBindingService.clearSession();
+            setSession(null);
+          }}
+        />
       ) : (
         <LoginScreen onLoginSuccess={(user) => setSession(user)} deviceInfo={deviceInfo} />
       )}

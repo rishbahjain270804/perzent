@@ -19,8 +19,10 @@ import {
 
 export default function DownloadPage() {
   const [downloadStarted, setDownloadStarted] = useState(false);
+  const apkAvailable = Boolean(process.env.NEXT_PUBLIC_EMPLOYEE_APK_URL);
 
   const handleDownloadApk = () => {
+    if (!apkAvailable) return;
     setDownloadStarted(true);
     // Trigger direct APK file download
     const link = document.createElement('a');
@@ -63,13 +65,13 @@ export default function DownloadPage() {
         {/* Banner */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-slate-800 bg-slate-900/80 text-[#86EFAC] text-[11px] font-medium">
-            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android Production Build • Version 1.0.0
+            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android App • Version 1.0.0
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
             Download Perzent Field Employee App
           </h1>
           <p className="text-xs text-[#6B7280] max-w-lg mx-auto">
-            Install on any Android smartphone to start 2-minute GPS duty tracking, automated lunch breaks, and live hardware battery & sound diagnostics.
+            Install on Android to use GPS-stamped attendance and secure employee sign-in.
           </p>
         </div>
 
@@ -92,27 +94,28 @@ export default function DownloadPage() {
                   <Download className="w-5 h-5 text-[#16A34A]" />
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Direct APK (Android 8.0+)
+                  {apkAvailable ? 'Signed APK' : 'Build pending'}
                 </span>
               </div>
               <div>
                 <h3 className="font-bold text-sm text-white">Standalone Android APK</h3>
                 <p className="text-[11px] text-[#6B7280] mt-0.5">Package: <code className="font-mono text-slate-300">app.jspcoders.perzent</code></p>
-                <p className="text-[10px] text-slate-400 font-mono mt-1">Size: ~24.8 MB • Fast Native Architecture</p>
+                <p className="text-[10px] text-slate-400 font-mono mt-1">{apkAvailable ? 'Published signed artifact' : 'No signed artifact is configured'}</p>
               </div>
 
               <div className="space-y-1 text-[11px] text-slate-300 pt-1 border-t border-slate-800">
-                <p className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-[#16A34A]" /> Continuous 2-min Background GPS</p>
-                <p className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-[#16A34A]" /> Live Battery, Sound, RAM & Storage Status</p>
+                <p className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-[#16A34A]" /> GPS-stamped Check-In & Check-Out</p>
+                <p className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-[#16A34A]" /> Secure employee session storage</p>
                 <p className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-[#16A34A]" /> Single Hardware UUID Anti-Tamper Lock</p>
               </div>
             </div>
 
             <button
               onClick={handleDownloadApk}
-              className="w-full py-2.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-green-600/20"
+              disabled={!apkAvailable}
+              className="w-full py-2.5 rounded bg-[#16A34A] hover:bg-[#15803D] disabled:bg-slate-700 disabled:text-slate-400 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-green-600/20"
             >
-              <Download className="w-4 h-4" /> Download APK to Phone
+              <Download className="w-4 h-4" /> {apkAvailable ? 'Download APK to Phone' : 'APK Not Published'}
             </button>
           </div>
 
