@@ -80,16 +80,34 @@ export default function DutyDashboardScreen({
     return () => clearInterval(complianceTimer);
   }, [refreshReadiness, session]);
 
-  // AppState listener: immediately re-compute clocks when app moves from background to active
+  // AppState listener: immediately re-sync server attendance & re-compute clocks when app becomes active
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
+        EmployeeApi.attendance(session)
+          .then((data) => {
+            const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
+            setShiftStatus(status);
+            if (data.punch_in_time) {
+              const t = new Date(data.punch_in_time).getTime();
+              setPunchInTimestamp(t);
+              setElapsedSec(Math.max(0, Math.floor((Date.now() - t) / 1000)));
+            }
+            if (data.active_break_started_at) {
+              const bt = new Date(data.active_break_started_at).getTime();
+              setBreakStartTimestamp(bt);
+              const used = Math.floor((Date.now() - bt) / 1000);
+              setBreakTimerSec(Math.max(0, 1800 - used));
+            }
+          })
+          .catch(() => undefined);
+
         updateClocks();
         refreshReadiness(true);
       }
     });
     return () => subscription.remove();
-  }, [updateClocks, refreshReadiness]);
+  }, [session, updateClocks, refreshReadiness]);
 
   // Real-time ticking clock based on absolute time differences
   useEffect(() => {
@@ -141,7 +159,9 @@ export default function DutyDashboardScreen({
         ...verified.position,
         integrity: verified.telemetry,
       });
-      setElapsedSec(0);
+      const punchTime = result.punch_in_time ? new Date(result.punch_in_time).getTime() : Date.now();
+      setPunchInTimestamp(punchTime);
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - punchTime) / 1000)));
       setShiftStatus(result.status);
       Alert.alert('Shift started', 'Your location and attendance were verified.');
     } catch (error: any) {
@@ -163,6 +183,9 @@ export default function DutyDashboardScreen({
             const position = await EmployeeApi.currentPosition();
             await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
             setShiftStatus('CHECKED_OUT');
+            setPunchInTimestamp(null);
+            setBreakStartTimestamp(null);
+            setElapsedSec(0);
           } catch (error: any) {
             Alert.alert('Check-out failed', error.message);
           } finally {
@@ -181,8 +204,10 @@ export default function DutyDashboardScreen({
         onPress: async () => {
           setActionLoading(true);
           try {
-            await EmployeeApi.attendance(session, 'POST', { action: 'start_break' });
+            const result = await EmployeeApi.attendance(session, 'POST', { action: 'start_break' });
             setShiftStatus('ON_BREAK');
+            const bt = result.break_start_time ? new Date(result.break_start_time).getTime() : Date.now();
+            setBreakStartTimestamp(bt);
             setBreakTimerSec(1800);
           } catch (error: any) {
             Alert.alert('Break failed', error.message);
@@ -201,6 +226,7 @@ export default function DutyDashboardScreen({
       if (!verified) return;
       await EmployeeApi.attendance(session, 'POST', { action: 'resume', integrity: verified.telemetry });
       setShiftStatus('CHECKED_IN');
+      setBreakStartTimestamp(null);
     } catch (error: any) {
       Alert.alert('Resume failed', error.message);
     } finally {
