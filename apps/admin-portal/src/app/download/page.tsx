@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Smartphone,
@@ -19,7 +19,14 @@ import {
 
 export default function DownloadPage() {
   const [downloadStarted, setDownloadStarted] = useState(false);
-  const apkAvailable = Boolean(process.env.NEXT_PUBLIC_EMPLOYEE_APK_URL);
+  const [apkStatus, setApkStatus] = useState<'checking' | 'available' | 'missing'>('checking');
+  const apkAvailable = apkStatus === 'available';
+
+  useEffect(() => {
+    fetch('/api/download/apk', { method: 'HEAD', cache: 'no-store' })
+      .then((response) => setApkStatus(response.ok ? 'available' : 'missing'))
+      .catch(() => setApkStatus('missing'));
+  }, []);
 
   const handleDownloadApk = () => {
     if (!apkAvailable) return;
@@ -94,13 +101,15 @@ export default function DownloadPage() {
                   <Download className="w-5 h-5 text-[#16A34A]" />
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  {apkAvailable ? 'Signed APK' : 'Build pending'}
+                  {apkStatus === 'checking' ? 'Checking build' : apkAvailable ? 'Installable APK' : 'Build pending'}
                 </span>
               </div>
               <div>
                 <h3 className="font-bold text-sm text-white">Standalone Android APK</h3>
                 <p className="text-[11px] text-[#6B7280] mt-0.5">Package: <code className="font-mono text-slate-300">app.jspcoders.perzent</code></p>
-                <p className="text-[10px] text-slate-400 font-mono mt-1">{apkAvailable ? 'Published signed artifact' : 'No signed artifact is configured'}</p>
+                <p className="text-[10px] text-slate-400 font-mono mt-1">
+                  {apkStatus === 'checking' ? 'Checking the published Android artifact…' : apkAvailable ? 'Published Android build is ready' : 'No valid Android artifact is configured'}
+                </p>
               </div>
 
               <div className="space-y-1 text-[11px] text-slate-300 pt-1 border-t border-slate-800">
@@ -115,7 +124,7 @@ export default function DownloadPage() {
               disabled={!apkAvailable}
               className="w-full py-2.5 rounded bg-[#16A34A] hover:bg-[#15803D] disabled:bg-slate-700 disabled:text-slate-400 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-green-600/20"
             >
-              <Download className="w-4 h-4" /> {apkAvailable ? 'Download APK to Phone' : 'APK Not Published'}
+              <Download className="w-4 h-4" /> {apkStatus === 'checking' ? 'Checking APK…' : apkAvailable ? 'Download APK to Phone' : 'APK Not Published'}
             </button>
           </div>
 
@@ -210,11 +219,11 @@ export default function DownloadPage() {
             </div>
             <div className="p-2.5 rounded border border-slate-800/80 bg-slate-900/60 space-y-1">
               <span className="font-bold font-mono text-[#86EFAC]">3. Permissions</span>
-              <p className="text-slate-400">Grant Location ("Allow all the time") & Device status permissions.</p>
+              <p className="text-slate-400">Grant precise location while using the app when Android prompts you.</p>
             </div>
             <div className="p-2.5 rounded border border-slate-800/80 bg-slate-900/60 space-y-1">
               <span className="font-bold font-mono text-[#86EFAC]">4. Login</span>
-              <p className="text-slate-400">Log in with your registered phone number (`+919876543210`).</p>
+              <p className="text-slate-400">Log in with the employee phone number and temporary password supplied by the owner.</p>
             </div>
           </div>
         </div>

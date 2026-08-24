@@ -33,17 +33,31 @@ export default function BillingPage() {
     transactions: PaymentTransaction[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<PaymentTransaction | null>(null);
 
   const fetchTransactions = () => {
-    fetch('/api/payments/transactions')
-      .then((res) => res.json())
+    setLoading(true);
+    setError('');
+    fetch('/api/payments/transactions', { cache: 'no-store' })
+      .then(async (res) => {
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || 'Could not load billing data');
+        if (!payload?.summary || !Array.isArray(payload.transactions)) {
+          throw new Error('Billing API returned an incomplete response');
+        }
+        return payload;
+      })
       .then((resData) => {
         setData(resData);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((reason) => {
+        setData(null);
+        setError(reason instanceof Error ? reason.message : 'Could not load billing data');
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -85,12 +99,18 @@ export default function BillingPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
       {/* 4-Cell Metric Summary Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 border border-slate-800 bg-[#0B1120] rounded-lg divide-y md:divide-y-0 md:divide-x divide-slate-800">
         <div className="p-3.5">
           <span className="text-[#6B7280] text-[11px]">Paid Seats Enrolled</span>
           <p className="text-xl font-bold text-white mt-1 tabular-nums">
-            {data?.summary.total_paid_seats || 0}
+            {data?.summary?.total_paid_seats || 0}
           </p>
           <span className="text-[10px] text-[#6B7280]">Active licenses</span>
         </div>
@@ -98,7 +118,7 @@ export default function BillingPage() {
         <div className="p-3.5">
           <span className="text-[#86EFAC] text-[11px]">Net Base Billed</span>
           <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">
-            ₹{data?.summary.total_base_billed?.toFixed(2) || '0.00'}
+            ₹{data?.summary?.total_base_billed?.toFixed(2) || '0.00'}
           </p>
           <span className="text-[10px] text-[#6B7280]">₹99.00 / seat fee</span>
         </div>
@@ -106,7 +126,7 @@ export default function BillingPage() {
         <div className="p-3.5">
           <span className="text-amber-400 text-[11px]">18% GST Remitted</span>
           <p className="text-xl font-bold text-white mt-1 tabular-nums text-amber-400">
-            ₹{data?.summary.total_tax_collected?.toFixed(2) || '0.00'}
+            ₹{data?.summary?.total_tax_collected?.toFixed(2) || '0.00'}
           </p>
           <span className="text-[10px] text-[#6B7280]">GSTIN compliant</span>
         </div>
@@ -114,7 +134,7 @@ export default function BillingPage() {
         <div className="p-3.5">
           <span className="text-[#86EFAC] text-[11px]">Gross Gateway Volume</span>
           <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">
-            ₹{data?.summary.total_revenue_inr?.toFixed(2) || '0.00'}
+            ₹{data?.summary?.total_revenue_inr?.toFixed(2) || '0.00'}
           </p>
           <span className="text-[10px] text-[#6B7280]">Cashfree PG settled</span>
         </div>

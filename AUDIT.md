@@ -44,7 +44,7 @@ The system is now a credible backend foundation, but it is **not production-read
 - Removed the payment bypass that accepted any client payment ID/order prefix as paid.
 - Added Cashfree hosted checkout, order-status confirmation, webhook HMAC verification, idempotent employee provisioning, and a persistent ledger.
 - Replaced wildcard credentialed CORS with an origin allowlist.
-- Removed the fake APK response and disabled download until a signed artifact URL is configured.
+- Removed the fabricated 2.3 KB APK package and replaced it with a genuine Expo/Android build for internal device testing; production still requires a private release key or Play/EAS signing.
 - Removed background-location permissions while background collection is not implemented.
 - Changed unsupported marketing claims and labeled device diagnostics as simulated.
 - Replaced the decorative live-map canvas with a real Leaflet/OpenStreetMap view.

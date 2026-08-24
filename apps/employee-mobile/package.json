@@ -1,7 +1,7 @@
 {
   "name": "@perzent/employee-mobile",
   "version": "1.0.0",
-  "main": "expo/AppEntry.js",
+  "main": "index.js",
   "private": true,
   "scripts": {
     "start": "expo start",
@@ -12,10 +12,12 @@
     "build:android:release": "cd android && gradlew.bat assembleRelease"
   },
   "dependencies": {
+    "@babel/runtime": "^7.29.7",
     "@perzent/location-engine": "workspace:*",
     "@perzent/shared-types": "workspace:*",
     "expo": "~52.0.0",
     "expo-application": "~6.0.2",
+    "expo-asset": "~11.0.5",
     "expo-device": "~7.0.3",
     "expo-location": "~18.0.10",
     "expo-secure-store": "~14.0.1",

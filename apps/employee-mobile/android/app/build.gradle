@@ -9,7 +9,8 @@ def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
-    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
+    root = file(projectRoot)
+    entryFile = file(projectRoot + "/index.js")
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
@@ -172,5 +173,21 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+// Expo 52's autolinker can emit the obsolete expo.core namespace in pnpm
+// workspaces. Normalize the generated package import before Java compilation.
+tasks.configureEach { task ->
+    if (task.name == "generateAutolinkingPackageList") {
+        task.doLast {
+            def packageList = file("$buildDir/generated/autolinking/src/main/java/com/facebook/react/PackageList.java")
+            if (packageList.exists()) {
+                packageList.text = packageList.text.replace(
+                    "import expo.core.ExpoModulesPackage;",
+                    "import expo.modules.ExpoModulesPackage;"
+                )
+            }
+        }
     }
 }
