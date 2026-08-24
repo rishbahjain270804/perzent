@@ -15,23 +15,29 @@ export interface DeviceTelemetry {
   battery_power_save?: boolean; // Power saving mode
 
   // Sound Tracking
-  sound_volume: number; // 0 - 100%
-  sound_mode: SoundMode; // NORMAL / SILENT / VIBRATE / DND
+  sound_volume?: number; // 0 - 100%
+  sound_mode?: SoundMode; // NORMAL / SILENT / VIBRATE / DND
 
   // Brightness Tracking
-  brightness_level: number; // 0 - 100%
+  brightness_level?: number; // 0 - 100%
   brightness_auto?: boolean; // Auto/Adaptive brightness
 
   // Storage Tracking
-  storage_used_gb: number; // e.g. 58.4 GB
-  storage_total_gb: number; // e.g. 128.0 GB
-  storage_free_gb: number; // e.g. 69.6 GB
-  storage_free_pct: number; // e.g. 54.4%
+  storage_used_gb?: number; // e.g. 58.4 GB
+  storage_total_gb?: number; // e.g. 128.0 GB
+  storage_free_gb?: number; // e.g. 69.6 GB
+  storage_free_pct?: number; // e.g. 54.4%
 
   // RAM Tracking
-  ram_used_gb: number; // e.g. 4.6 GB
-  ram_total_gb: number; // e.g. 8.0 GB
-  ram_usage_pct: number; // e.g. 57.5%
+  ram_used_gb?: number; // e.g. 4.6 GB
+  ram_total_gb?: number; // e.g. 8.0 GB
+  ram_usage_pct?: number; // e.g. 57.5%
+
+  // Work-readiness signals collected by the Android app and shown only to management.
+  developer_options_enabled?: boolean;
+  location_services_enabled?: boolean;
+  location_permission_granted?: boolean;
+  mock_location_detected?: boolean;
 
   updated_at: string;
 }
@@ -42,17 +48,21 @@ export const DeviceTelemetrySchema = z.object({
   battery_health: z.enum(['GOOD', 'NORMAL', 'OVERHEAT', 'DEGRADED']).optional(),
   battery_temperature: z.number().optional(),
   battery_power_save: z.boolean().optional(),
-  sound_volume: z.number().min(0).max(100),
-  sound_mode: z.enum(['NORMAL', 'SILENT', 'VIBRATE', 'DND']).default('NORMAL'),
-  brightness_level: z.number().min(0).max(100),
+  sound_volume: z.number().min(0).max(100).optional(),
+  sound_mode: z.enum(['NORMAL', 'SILENT', 'VIBRATE', 'DND']).optional(),
+  brightness_level: z.number().min(0).max(100).optional(),
   brightness_auto: z.boolean().optional(),
-  storage_used_gb: z.number(),
-  storage_total_gb: z.number(),
-  storage_free_gb: z.number(),
-  storage_free_pct: z.number(),
-  ram_used_gb: z.number(),
-  ram_total_gb: z.number(),
-  ram_usage_pct: z.number(),
+  storage_used_gb: z.number().optional(),
+  storage_total_gb: z.number().optional(),
+  storage_free_gb: z.number().optional(),
+  storage_free_pct: z.number().optional(),
+  ram_used_gb: z.number().optional(),
+  ram_total_gb: z.number().optional(),
+  ram_usage_pct: z.number().optional(),
+  developer_options_enabled: z.boolean().optional(),
+  location_services_enabled: z.boolean().optional(),
+  location_permission_granted: z.boolean().optional(),
+  mock_location_detected: z.boolean().optional(),
   updated_at: z.string().optional(),
 });
 

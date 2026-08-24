@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import {
-  View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ScrollView,
+  View,
 } from 'react-native';
 import { DeviceBindingService } from '../services/DeviceBindingService';
-import { DeviceTelemetryService } from '../services/DeviceTelemetryService';
 import { EmployeeApi } from '../services/EmployeeApi';
 
 export default function LoginScreen({
@@ -22,345 +23,135 @@ export default function LoginScreen({
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [telemetry] = useState(DeviceTelemetryService.getTelemetry());
 
   const handleLogin = async () => {
-    setLoading(true);
+    if (!phone.trim() || !password) {
+      Alert.alert('Missing details', 'Enter your registered phone number and password.');
+      return;
+    }
 
+    setLoading(true);
     try {
-      const user = await EmployeeApi.login(phone, password, deviceInfo);
+      const user = await EmployeeApi.login(phone.trim(), password, deviceInfo);
       await DeviceBindingService.saveSession(user);
       onLoginSuccess(user);
-    } catch (err: any) {
-      Alert.alert('Login Failed', err.message || 'Unable to authenticate');
+    } catch (error: any) {
+      Alert.alert('Login failed', error.message || 'Unable to authenticate');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      {/* Primary & Secondary Logo Showcase Header */}
-      <View style={styles.header}>
-        <View style={styles.logoRow}>
-          {/* Primary Logo: White on Green */}
-          <View style={styles.primaryLogoBadge}>
-            <Text style={styles.primaryLogoText}>P</Text>
-          </View>
+    <KeyboardAvoidingView
+      style={styles.page}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <View style={styles.brandMark}>
+          <Text style={styles.brandLetter}>P</Text>
+        </View>
+        <Text style={styles.title}>Welcome to Perzent</Text>
+        <Text style={styles.subtitle}>Sign in to start or manage your work shift.</Text>
 
-          {/* Secondary Logo: Black/Dark on White */}
-          <View style={styles.secondaryLogoBadge}>
-            <Text style={styles.secondaryLogoText}>P</Text>
-          </View>
+        <View style={styles.formCard}>
+          <Text style={styles.label}>Registered phone number</Text>
+          <TextInput
+            style={styles.input}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Phone number"
+            placeholderTextColor="#94A3B8"
+            keyboardType="phone-pad"
+            autoComplete="tel"
+          />
+
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor="#94A3B8"
+            secureTextEntry
+            autoComplete="password"
+          />
+
+          <TouchableOpacity
+            style={[styles.loginButton, loading && styles.buttonDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            <Text style={styles.loginButtonText}>{loading ? 'Signing in…' : 'Sign in'}</Text>
+          </TouchableOpacity>
         </View>
 
-        <Text style={styles.appTitle}>PERZENT</Text>
-        <Text style={styles.appSubtitle}>Field Employee Duty & Real-Time Tracking</Text>
-      </View>
-
-      {/* Hardware Telemetry Pre-Check Card */}
-      <View style={styles.deviceCard}>
-        <View style={styles.deviceTitleRow}>
-          <Text style={styles.deviceTitle}>BOUND PHYSICAL DEVICE:</Text>
-          <View style={styles.deviceVerifiedPill}>
-            <Text style={styles.deviceVerifiedText}>VERIFIED HARDWARE</Text>
-          </View>
-        </View>
-        <Text style={styles.deviceUuid}>
-          {deviceInfo?.device_model} • {deviceInfo?.device_uuid}
-        </Text>
-
-        <View style={styles.telemetryQuickRow}>
-          <View style={styles.telemetryChip}>
-            <Text style={styles.telemetryChipIcon}>🔋</Text>
-            <Text style={styles.telemetryChipVal}>{telemetry.battery_level}%</Text>
-          </View>
-          <View style={styles.telemetryChip}>
-            <Text style={styles.telemetryChipIcon}>🔊</Text>
-            <Text style={styles.telemetryChipVal}>{telemetry.sound_mode}</Text>
-          </View>
-          <View style={styles.telemetryChip}>
-            <Text style={styles.telemetryChipIcon}>☀️</Text>
-            <Text style={styles.telemetryChipVal}>{telemetry.brightness_level}%</Text>
-          </View>
-          <View style={styles.telemetryChip}>
-            <Text style={styles.telemetryChipIcon}>💾</Text>
-            <Text style={styles.telemetryChipVal}>{telemetry.storage_free_pct}% Free</Text>
-          </View>
-          <View style={styles.telemetryChip}>
-            <Text style={styles.telemetryChipIcon}>🧠</Text>
-            <Text style={styles.telemetryChipVal}>{telemetry.ram_used_gb} GB RAM</Text>
-          </View>
-        </View>
-
-        <Text style={styles.deviceNotice}>
-          Single-device hardware anti-tamper lock active. Live battery, sound, storage & RAM status synchronized upon shift check-in.
-        </Text>
-      </View>
-
-      {/* Login Form */}
-      <View style={styles.form}>
-        <Text style={styles.label}>REGISTERED PHONE NUMBER</Text>
-        <TextInput
-          style={styles.input}
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="+91 98111 22233"
-          placeholderTextColor="#6B7280"
-          keyboardType="phone-pad"
-        />
-
-        <Text style={styles.label}>PASSWORD / ACCESS PIN</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Enter password"
-          placeholderTextColor="#6B7280"
-          secureTextEntry
-        />
-
-        {/* Primary Green Button (#16A34A) with #FFFFFF text */}
-        <TouchableOpacity
-          style={styles.loginBtn}
-          onPress={handleLogin}
-          disabled={loading}
-        >
-          <Text style={styles.loginBtnText}>{loading ? 'VERIFYING HARDWARE...' : 'LOGIN TO SHIFT'}</Text>
-        </TouchableOpacity>
-
-        <View style={styles.noRegisterNotice}>
-          <Text style={styles.noRegisterText}>
-            🔒 Zero Self-Registration Policy. Accounts are provisioned exclusively by employer management.
+        <View style={styles.notice}>
+          <Text style={styles.noticeTitle}>Work device protection</Text>
+          <Text style={styles.noticeText}>
+            Device integrity and work-session signals are checked securely. Technical details are visible only to authorized management.
           </Text>
         </View>
-
-      </View>
-    </ScrollView>
+        <Text style={styles.footer}>Accounts are created by your employer.</Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 22,
-    justifyContent: 'center',
-    backgroundColor: '#0F172A',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  // Primary Logo: White on Green (#16A34A)
-  primaryLogoBadge: {
-    width: 52,
-    height: 52,
+  page: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  brandMark: {
+    width: 56,
+    height: 56,
     borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#16A34A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#16A34A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  primaryLogoText: {
-    color: '#FFFFFF', // Text on green
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  // Secondary Logo: Black/Dark (#111827) on White (#FFFFFF)
-  secondaryLogoBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  secondaryLogoText: {
-    color: '#111827', // Almost black primary text
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  appTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  appSubtitle: {
-    color: '#6B7280', // Secondary Text
-    fontSize: 12,
-    marginTop: 4,
-  },
-  deviceCard: {
-    backgroundColor: '#1E293B',
-    borderColor: '#334155',
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
+    alignSelf: 'center',
     marginBottom: 18,
   },
-  deviceTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  deviceTitle: {
-    color: '#16A34A', // Brand Primary Green
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  deviceVerifiedPill: {
-    backgroundColor: '#14532D',
-    borderColor: '#16A34A',
+  brandLetter: { color: '#FFFFFF', fontSize: 30, fontWeight: '800' },
+  title: { color: '#0F172A', fontSize: 27, fontWeight: '800', textAlign: 'center' },
+  subtitle: { color: '#64748B', fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 28 },
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 20,
     borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    borderColor: '#E2E8F0',
   },
-  deviceVerifiedText: {
-    color: '#4ADE80',
-    fontSize: 8,
-    fontWeight: 'bold',
-  },
-  deviceUuid: {
-    color: '#F8FAFC',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  telemetryQuickRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  telemetryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#0F172A',
-    borderColor: '#334155',
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  telemetryChipIcon: {
-    fontSize: 10,
-  },
-  telemetryChipVal: {
-    color: '#CBD5E1',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  deviceNotice: {
-    color: '#6B7280', // Secondary Text
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  form: {
-    backgroundColor: '#1E293B',
-    borderColor: '#334155',
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 18,
-  },
-  label: {
-    color: '#94A3B8',
-    fontSize: 10,
-    fontWeight: 'bold',
-    marginBottom: 6,
-    marginTop: 8,
-    letterSpacing: 0.5,
-  },
+  label: { color: '#334155', fontSize: 13, fontWeight: '700', marginBottom: 7, marginTop: 4 },
   input: {
-    backgroundColor: '#0F172A',
-    borderColor: '#334155',
+    height: 50,
     borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    color: '#0F172A',
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 16,
+    marginBottom: 16,
   },
-  // Primary Green Button: #16A34A, Hover: #15803D
-  loginBtn: {
+  loginButton: {
+    height: 52,
+    borderRadius: 12,
     backgroundColor: '#16A34A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  buttonDisabled: { opacity: 0.6 },
+  loginButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  notice: {
+    backgroundColor: '#ECFDF5',
     borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
+    padding: 15,
     marginTop: 18,
-    shadowColor: '#16A34A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  loginBtnText: {
-    color: '#FFFFFF', // Text on green buttons: #FFFFFF
-    fontSize: 13,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  noRegisterNotice: {
-    marginTop: 14,
-    padding: 10,
-    backgroundColor: '#0F172A80',
-    borderRadius: 10,
-  },
-  noRegisterText: {
-    color: '#6B7280', // Secondary Text
-    fontSize: 11,
-    textAlign: 'center',
-    lineHeight: 15,
-  },
-  demoSection: {
-    marginTop: 16,
-    paddingTop: 14,
-    borderTopColor: '#334155',
-    borderTopWidth: 1,
-  },
-  demoTitle: {
-    color: '#6B7280', // Secondary Text
-    fontSize: 10,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  demoRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  demoBtn: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    borderColor: '#334155',
     borderWidth: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
+    borderColor: '#BBF7D0',
   },
-  demoBtnText: {
-    color: '#86EFAC',
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  noticeTitle: { color: '#166534', fontSize: 14, fontWeight: '800', marginBottom: 4 },
+  noticeText: { color: '#3F6212', fontSize: 13, lineHeight: 19 },
+  footer: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 18 },
 });

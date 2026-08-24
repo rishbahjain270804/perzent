@@ -30,15 +30,15 @@ export default function App() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Initializing Perzent Anti-Tamper Engine...</Text>
+        <ActivityIndicator size="large" color="#16A34A" />
+        <Text style={styles.loadingText}>Preparing your workspace…</Text>
       </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#090d16" />
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       {session ? (
         <DutyDashboardScreen
           session={session}
@@ -59,16 +59,16 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#F8FAFC',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#94a3b8',
+    color: '#64748B',
     fontSize: 13,
     marginTop: 12,
   },

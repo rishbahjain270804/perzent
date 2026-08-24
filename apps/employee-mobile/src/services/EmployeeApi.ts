@@ -37,7 +37,12 @@ export class EmployeeApi {
   static async currentPosition() {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (permission.status !== 'granted') throw new Error('Location permission is required');
+    const servicesEnabled = await Location.hasServicesEnabledAsync();
+    if (!servicesEnabled) throw new Error('Turn on Location Services (GPS) to continue');
     const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    if ((position.coords as typeof position.coords & { mocked?: boolean }).mocked) {
+      throw new Error('Mock or fake location is not allowed');
+    }
     return {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,

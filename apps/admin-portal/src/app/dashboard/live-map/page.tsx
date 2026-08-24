@@ -165,12 +165,19 @@ export default function LiveMapPage() {
           iconAnchor: [15, 15],
         });
         const marker = leaflet.marker([location.latitude, location.longitude], { icon }).addTo(layer);
+        const telemetry = member.telemetry;
         marker.bindTooltip(buildTooltip(member.full_name, [
           ['Status', meta.label],
           ['Location', location.address_name || 'Address unavailable'],
           ['Last ping', formatTime(location.last_ping_at)],
           ['Accuracy', `±${Math.round(location.accuracy)} m`],
           ['Battery', member.battery_level == null ? 'Unavailable' : `${member.battery_level}%`],
+          ['Device', member.device_model || 'Unavailable'],
+          ['GPS', telemetry?.location_services_enabled === undefined ? 'Not reported' : telemetry.location_services_enabled ? 'On' : 'Off'],
+          ['Location permission', telemetry?.location_permission_granted === undefined ? 'Not reported' : telemetry.location_permission_granted ? 'Allowed' : 'Blocked'],
+          ['Developer options', telemetry?.developer_options_enabled === undefined ? 'Not reported' : telemetry.developer_options_enabled ? 'On' : 'Off'],
+          ['Power saver', telemetry?.battery_power_save === undefined ? 'Not reported' : telemetry.battery_power_save ? 'On' : 'Off'],
+          ['Mock location', telemetry?.mock_location_detected === undefined ? 'Not reported' : telemetry.mock_location_detected ? 'Detected' : 'Clear'],
         ]), {
           direction: 'top',
           offset: [0, -12],

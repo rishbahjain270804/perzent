@@ -4,6 +4,17 @@ import { authErrorResponse, requireSession } from '@/lib/auth';
 
 const todayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
 
+const complianceError = (integrity: any) => {
+  if (!integrity || typeof integrity !== 'object') return 'Device compliance verification is required';
+  if (integrity.location_permission_granted !== true) return 'Precise location permission must be enabled';
+  if (integrity.location_services_enabled !== true) return 'Location Services (GPS) must be enabled';
+  if (integrity.developer_options_enabled !== false) return 'Developer Options must be disabled and verified';
+  if (integrity.battery_power_save !== false) return 'Battery Saver / Power Saving mode must be disabled and verified';
+  if (!Number.isFinite(integrity.battery_level) || integrity.battery_level < 5) return 'Battery must be at least 5%';
+  if (integrity.mock_location_detected !== false) return 'A clear mock-location check is required';
+  return null;
+};
+
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
@@ -34,6 +45,8 @@ export async function POST(request: Request) {
 
     if (body.action === 'check_in') {
       if (attendance) return NextResponse.json({ error: 'Attendance already exists for today' }, { status: 409 });
+      const blockedReason = complianceError(body.integrity);
+      if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
       if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
         return NextResponse.json({ error: 'A verified GPS position is required' }, { status: 400 });
       }
@@ -65,6 +78,8 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'resume') {
+      const blockedReason = complianceError(body.integrity);
+      if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
       const activeBreak = attendance.breaks[0];
       if (!activeBreak) return NextResponse.json({ error: 'No active break' }, { status: 409 });
       const end = new Date();
