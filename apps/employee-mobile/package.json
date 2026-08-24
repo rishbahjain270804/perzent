@@ -1,13 +1,15 @@
 {
   "name": "@perzent/employee-mobile",
   "version": "1.0.0",
-  "main": "App.tsx",
+  "main": "expo/AppEntry.js",
   "private": true,
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "prebuild:android": "expo prebuild --platform android",
+    "build:android:release": "cd android && gradlew.bat assembleRelease"
   },
   "dependencies": {
     "@perzent/location-engine": "workspace:*",

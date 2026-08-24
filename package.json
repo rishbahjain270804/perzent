@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "turbo dev",
-    "build": "node scripts/package-apk.mjs && turbo build",
+    "build": "turbo build",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "db:generate": "pnpm --filter @perzent/database generate",
