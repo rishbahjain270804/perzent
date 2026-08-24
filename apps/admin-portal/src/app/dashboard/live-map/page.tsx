@@ -1,242 +1,377 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LayerGroup, Map as LeafletMap, Marker } from 'leaflet';
 import {
-  MapPin,
-  Coffee,
-  RefreshCw,
-  Navigation,
+  ArrowLeft,
   Battery,
-  Volume2,
-  Sun,
-  HardDrive,
-  Cpu,
-  Smartphone,
-  CheckCircle2,
+  CalendarDays,
+  Clock3,
+  LocateFixed,
+  MapPin,
+  Navigation,
+  RefreshCw,
+  Route,
+  Users,
 } from 'lucide-react';
-import { LiveTeamMember } from '@perzent/shared-types';
+import type { DailyRoutePlayback, LiveTeamMember } from '@perzent/shared-types';
+
+type MapMode = 'LIVE' | 'DAY';
+
+const today = () => new Date().toLocaleDateString('en-CA');
+
+const statusMeta: Record<LiveTeamMember['shift_status'], { label: string; color: string; surface: string }> = {
+  CHECKED_IN: { label: 'On duty', color: '#16a34a', surface: '#dcfce7' },
+  ON_BREAK: { label: 'On break', color: '#d97706', surface: '#fef3c7' },
+  CHECKED_OUT: { label: 'Checked out', color: '#64748b', surface: '#e2e8f0' },
+  OFF_DUTY: { label: 'Off duty', color: '#94a3b8', surface: '#f1f5f9' },
+};
+
+function formatTime(value?: string) {
+  if (!value) return 'No ping';
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function buildTooltip(title: string, rows: Array<[string, string]>) {
+  const card = document.createElement('div');
+  card.className = 'perzent-map-hover-card';
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  card.appendChild(heading);
+  rows.forEach(([label, value]) => {
+    const row = document.createElement('div');
+    const key = document.createElement('span');
+    const content = document.createElement('b');
+    key.textContent = label;
+    content.textContent = value;
+    row.append(key, content);
+    card.appendChild(row);
+  });
+  return card;
+}
 
 export default function LiveMapPage() {
-  const [team, setTeam] = useState<LiveTeamMember[]>([]);
-  const [selectedUser, setSelectedUser] = useState<LiveTeamMember | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastRefreshed, setLastRefreshed] = useState(new Date().toLocaleTimeString());
+  const mapNodeRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const layerRef = useRef<LayerGroup | null>(null);
+  const leafletRef = useRef<typeof import('leaflet') | null>(null);
+  const liveMarkerRefs = useRef(new Map<string, Marker>());
 
-  const fetchLiveTeam = () => {
-    setLoading(true);
-    fetch('/api/live-team')
-      .then((res) => res.json())
-      .then((data) => {
-        setTeam(data);
-        if (data.length > 0) {
-          if (!selectedUser) {
-            setSelectedUser(data[0]);
-          } else {
-            const updated = data.find((u: LiveTeamMember) => u.user_id === selectedUser.user_id);
-            if (updated) setSelectedUser(updated);
-          }
-        }
-        setLastRefreshed(new Date().toLocaleTimeString());
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
+  const [mapReady, setMapReady] = useState(false);
+  const [mode, setMode] = useState<MapMode>('LIVE');
+  const [team, setTeam] = useState<LiveTeamMember[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [playback, setPlayback] = useState<DailyRoutePlayback | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  const selectedUser = useMemo(
+    () => team.find((member) => member.user_id === selectedId) || null,
+    [selectedId, team]
+  );
+  const locatedTeam = useMemo(() => team.filter((member) => member.current_location), [team]);
+
+  const fetchLiveTeam = useCallback(async () => {
+    try {
+      setError('');
+      const response = await fetch('/api/live-team', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not load the live team');
+      if (!Array.isArray(result)) throw new Error('Unexpected live-team response');
+      setTeam(result);
+      setLastRefreshed(new Date());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not load the live team');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchLiveTeam();
-    const interval = setInterval(fetchLiveTeam, 6000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(fetchLiveTeam, 10_000);
+    return () => window.clearInterval(interval);
+  }, [fetchLiveTeam]);
+
+  useEffect(() => {
+    let mounted = true;
+    import('leaflet').then((leaflet) => {
+      if (!mounted || !mapNodeRef.current || mapRef.current) return;
+      leafletRef.current = leaflet;
+      const map = leaflet.map(mapNodeRef.current, {
+        zoomControl: false,
+        attributionControl: true,
+      }).setView([22.8, 79.1], 5);
+      leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
+      leaflet.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+      mapRef.current = map;
+      layerRef.current = leaflet.layerGroup().addTo(map);
+      setMapReady(true);
+    });
+    return () => {
+      mounted = false;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      layerRef.current = null;
+      leafletRef.current = null;
+    };
   }, []);
 
-  const telemetry = selectedUser?.telemetry || {
-    battery_level: selectedUser?.battery_level || 85,
-    battery_status: 'DISCHARGING' as const,
-    battery_health: 'GOOD' as const,
-    battery_temperature: 31.8,
-    sound_volume: 75,
-    sound_mode: 'NORMAL' as const,
-    brightness_level: 80,
-    brightness_auto: true,
-    storage_used_gb: 58.4,
-    storage_total_gb: 128.0,
-    storage_free_gb: 69.6,
-    storage_free_pct: 54.4,
-    ram_used_gb: 4.6,
-    ram_total_gb: 8.0,
-    ram_usage_pct: 57.5,
-    updated_at: new Date().toISOString(),
+  useEffect(() => {
+    if (mode !== 'DAY' || !selectedId) return;
+    let current = true;
+    setRouteLoading(true);
+    setError('');
+    fetch(`/api/routes?user_id=${encodeURIComponent(selectedId)}&date=${selectedDate}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not load this route');
+        if (current) setPlayback(result);
+      })
+      .catch((reason) => {
+        if (current) {
+          setPlayback(null);
+          setError(reason.message || 'Could not load this route');
+        }
+      })
+      .finally(() => current && setRouteLoading(false));
+    return () => { current = false; };
+  }, [mode, selectedDate, selectedId]);
+
+  useEffect(() => {
+    const leaflet = leafletRef.current;
+    const map = mapRef.current;
+    const layer = layerRef.current;
+    if (!mapReady || !leaflet || !map || !layer) return;
+
+    layer.clearLayers();
+    liveMarkerRefs.current.clear();
+    const bounds: Array<[number, number]> = [];
+
+    if (mode === 'LIVE') {
+      locatedTeam.forEach((member) => {
+        const location = member.current_location!;
+        const meta = statusMeta[member.shift_status];
+        const icon = leaflet.divIcon({
+          className: 'employee-live-marker',
+          html: `<span class="employee-live-marker-ring" style="--marker-color:${meta.color}"></span><span class="employee-live-marker-dot" style="--marker-color:${meta.color}"></span>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        });
+        const marker = leaflet.marker([location.latitude, location.longitude], { icon }).addTo(layer);
+        marker.bindTooltip(buildTooltip(member.full_name, [
+          ['Status', meta.label],
+          ['Location', location.address_name || 'Address unavailable'],
+          ['Last ping', formatTime(location.last_ping_at)],
+          ['Accuracy', `±${Math.round(location.accuracy)} m`],
+          ['Battery', member.battery_level == null ? 'Unavailable' : `${member.battery_level}%`],
+        ]), {
+          direction: 'top',
+          offset: [0, -12],
+          opacity: 1,
+          className: 'perzent-leaflet-tooltip',
+        });
+        marker.on('click', () => {
+          setSelectedId(member.user_id);
+          setMode('DAY');
+        });
+        liveMarkerRefs.current.set(member.user_id, marker);
+        bounds.push([location.latitude, location.longitude]);
+      });
+    } else if (playback) {
+      const positions = playback.waypoints.map((point) => [point.latitude, point.longitude] as [number, number]);
+      if (positions.length > 1) {
+        leaflet.polyline(positions, { color: '#2563eb', weight: 4, opacity: 0.7 }).addTo(layer);
+      }
+      playback.waypoints.forEach((point, index) => {
+        const isStart = index === 0;
+        const isEnd = index === playback.waypoints.length - 1;
+        const marker = leaflet.circleMarker([point.latitude, point.longitude], {
+          radius: isStart || isEnd ? 7 : 4,
+          color: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#ffffff',
+          weight: isStart || isEnd ? 3 : 2,
+          fillColor: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#2563eb',
+          fillOpacity: 0.95,
+        }).addTo(layer);
+        marker.bindTooltip(buildTooltip(
+          isStart ? 'Shift started' : isEnd ? 'Latest / final point' : `Route point ${index + 1}`,
+          [
+            ['Time', formatTime(point.recorded_at)],
+            ['Speed', `${Math.round(point.speed)} km/h`],
+            ['Accuracy', `±${Math.round(point.accuracy)} m`],
+          ]
+        ), { direction: 'top', offset: [0, -8], opacity: 1, className: 'perzent-leaflet-tooltip' });
+        bounds.push([point.latitude, point.longitude]);
+      });
+      playback.stops.forEach((stop) => {
+        const marker = leaflet.circleMarker([stop.latitude, stop.longitude], {
+          radius: 8,
+          color: '#ffffff',
+          weight: 3,
+          fillColor: '#f59e0b',
+          fillOpacity: 1,
+        }).addTo(layer);
+        marker.bindTooltip(buildTooltip('Recorded stop', [
+          ['Place', stop.address_name],
+          ['Arrived', formatTime(stop.start_time)],
+          ['Duration', `${stop.duration_minutes} min`],
+        ]), { direction: 'top', offset: [0, -9], opacity: 1, className: 'perzent-leaflet-tooltip' });
+        bounds.push([stop.latitude, stop.longitude]);
+      });
+    }
+
+    if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
+    if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
+  }, [locatedTeam, mapReady, mode, playback]);
+
+  const focusLiveEmployee = (member: LiveTeamMember) => {
+    const marker = liveMarkerRefs.current.get(member.user_id);
+    if (!marker || !member.current_location) return;
+    marker.openTooltip();
+    mapRef.current?.panTo([member.current_location.latitude, member.current_location.longitude], { animate: true });
+  };
+
+  const openDay = (member: LiveTeamMember) => {
+    setSelectedId(member.user_id);
+    setPlayback(null);
+    setMode('DAY');
   };
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="map-page space-y-4 max-w-[1600px] mx-auto text-slate-900">
+      <section className="map-toolbar">
         <div>
-          <h1 className="text-base font-bold text-white tracking-tight">Live Fleet Map & Device Matrix</h1>
-          <p className="text-[11px] text-[#6B7280]">
-            Latest stored GPS coordinates and device status • Updated {lastRefreshed}
+          <div className="flex items-center gap-2">
+            <span className="map-eyebrow"><LocateFixed className="w-3.5 h-3.5" /> Workforce location</span>
+            {mode === 'LIVE' && <span className="map-live-pill"><i /> Live</span>}
+          </div>
+          <h1>{mode === 'LIVE' ? 'All employees — live view' : `${selectedUser?.full_name || 'Employee'} — full day`}</h1>
+          <p>
+            {mode === 'LIVE'
+              ? `${locatedTeam.length} of ${team.length} employees have a stored live position`
+              : `${selectedDate} · ${playback?.waypoints.length || 0} route points · ${playback?.total_distance_km || 0} km`}
           </p>
         </div>
-        <button
-          onClick={fetchLiveTeam}
-          disabled={loading}
-          className="p-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 hover:text-white transition inline-flex items-center gap-1 text-xs"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
-      </div>
 
-      {/* Main Grid: Map & Telemetry Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[500px]">
-        {/* Left 2 Cols: Interactive Map Simulation */}
-        <div className="lg:col-span-2 border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden flex flex-col">
-          <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between text-xs">
-            <span className="font-semibold text-white">Live Field Position Canvas</span>
-            {selectedUser && (
-              <span className="text-[#86EFAC] font-mono text-[11px]">
-                {selectedUser.current_location?.latitude.toFixed(4)}° N, {selectedUser.current_location?.longitude.toFixed(4)}° E
-              </span>
-            )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {mode === 'DAY' && (
+            <>
+              <label className="map-date-control">
+                <CalendarDays className="w-3.5 h-3.5" />
+                <input type="date" max={today()} value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+              </label>
+              <button className="map-secondary-button" onClick={() => setMode('LIVE')}>
+                <ArrowLeft className="w-3.5 h-3.5" /> All employees live
+              </button>
+            </>
+          )}
+          <button className="map-secondary-button" onClick={fetchLiveTeam} disabled={loading}>
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
+      </section>
+
+      {error && <div className="map-error">{error}</div>}
+
+      <section className="map-layout">
+        <aside className="map-roster">
+          <div className="map-roster-heading">
+            <div>
+              <strong>{mode === 'LIVE' ? 'Team now' : 'Selected employee'}</strong>
+              <span>{lastRefreshed ? `Updated ${formatTime(lastRefreshed.toISOString())}` : 'Loading positions…'}</span>
+            </div>
+            <span>{mode === 'LIVE' ? team.length : 1}</span>
           </div>
 
-          <div className="flex-1 bg-slate-950 p-4 relative flex flex-col justify-between">
-            {/* Map Grid Visualization */}
-            <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40"></div>
-
-            {/* Selected Representative Pin Box */}
-            {selectedUser && (
-              <div className="relative z-10 max-w-sm p-3 rounded border border-slate-800 bg-[#0B1120]/95 space-y-1.5 shadow-lg">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-xs">{selectedUser.full_name}</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                    {selectedUser.shift_status === 'CHECKED_IN' ? 'On Duty' : 'On Break'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-300 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
-                  {selectedUser.current_location?.address_name || 'Delhi NCR Region'}
-                </p>
-                <div className="flex items-center gap-3 text-[10px] text-[#6B7280] font-mono pt-1 border-t border-slate-800">
-                  <span>Dwell: {selectedUser.dwell_minutes}m</span>
-                  <span>Accuracy: ±4.2m</span>
-                  <span>Battery: {selectedUser.battery_level}%</span>
-                </div>
-              </div>
-            )}
-
-            {/* Team Position Markers Strip */}
-            <div className="relative z-10 grid grid-cols-3 gap-2 mt-auto pt-4">
-              {team.map((m) => (
+          <div className="map-roster-list">
+            {(mode === 'LIVE' ? team : selectedUser ? [selectedUser] : []).map((member) => {
+              const meta = statusMeta[member.shift_status];
+              return (
                 <button
-                  key={m.user_id}
-                  onClick={() => setSelectedUser(m)}
-                  className={`p-2 rounded border text-left text-xs transition ${
-                    selectedUser?.user_id === m.user_id
-                      ? 'border-[#16A34A] bg-[#16A34A]/10 text-white'
-                      : 'border-slate-800 bg-[#0B1120] text-slate-400 hover:text-white'
-                  }`}
+                  key={member.user_id}
+                  className={`map-employee-card ${selectedId === member.user_id ? 'is-selected' : ''}`}
+                  onMouseEnter={() => mode === 'LIVE' && focusLiveEmployee(member)}
+                  onMouseLeave={() => liveMarkerRefs.current.get(member.user_id)?.closeTooltip()}
+                  onFocus={() => mode === 'LIVE' && focusLiveEmployee(member)}
+                  onClick={() => openDay(member)}
                 >
-                  <p className="font-semibold truncate">{m.full_name}</p>
-                  <p className="text-[10px] text-[#6B7280] truncate">{m.current_location?.address_name || 'En Route'}</p>
+                  <span className="map-avatar">{member.full_name.slice(0, 1).toUpperCase()}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="map-employee-name">{member.full_name}</span>
+                    <span className="map-employee-location">
+                      {member.current_location?.address_name || 'No location received today'}
+                    </span>
+                    <span className="map-employee-meta">
+                      <i style={{ background: meta.color }} /> {meta.label}
+                      {member.current_location && <> · {formatTime(member.current_location.last_ping_at)}</>}
+                    </span>
+                  </span>
+                  <Route className="w-4 h-4 text-slate-400" />
                 </button>
-              ))}
+              );
+            })}
+          </div>
+
+          {mode === 'LIVE' && (
+            <div className="map-roster-help">
+              <Navigation className="w-4 h-4" />
+              <span>Hover an employee or map dot for details. Click either to open the full-day trail.</span>
             </div>
+          )}
+
+          {mode === 'DAY' && selectedUser && (
+            <div className="map-selected-summary">
+              <div><MapPin className="w-4 h-4" /><span>Latest</span><strong>{selectedUser.current_location?.address_name || 'Unavailable'}</strong></div>
+              <div><Clock3 className="w-4 h-4" /><span>Dwell</span><strong>{selectedUser.dwell_minutes} min</strong></div>
+              <div><Battery className="w-4 h-4" /><span>Battery</span><strong>{selectedUser.battery_level == null ? '—' : `${selectedUser.battery_level}%`}</strong></div>
+            </div>
+          )}
+        </aside>
+
+        <div className="map-canvas-wrap">
+          <div ref={mapNodeRef} className="map-canvas" aria-label={mode === 'LIVE' ? 'Live employee map' : 'Employee full-day route map'} />
+          {!mapReady && <div className="map-loading"><RefreshCw className="w-5 h-5 animate-spin" /> Loading map…</div>}
+          {routeLoading && <div className="map-route-loading"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading day trail</div>}
+
+          {mode === 'LIVE' && !loading && locatedTeam.length === 0 && (
+            <div className="map-empty-state">
+              <Users className="w-7 h-7" />
+              <strong>No live positions yet</strong>
+              <span>Employees appear here after the mobile app uploads a GPS waypoint.</span>
+            </div>
+          )}
+          {mode === 'DAY' && !routeLoading && playback && playback.waypoints.length === 0 && playback.stops.length === 0 && (
+            <div className="map-empty-state">
+              <Route className="w-7 h-7" />
+              <strong>No route recorded for this day</strong>
+              <span>Choose another date or confirm that route tracking uploaded waypoints.</span>
+            </div>
+          )}
+
+          <div className="map-legend">
+            {mode === 'LIVE' ? (
+              <>
+                <span><i style={{ background: '#16a34a' }} /> On duty</span>
+                <span><i style={{ background: '#d97706' }} /> Break</span>
+                <span><i style={{ background: '#94a3b8' }} /> Offline</span>
+              </>
+            ) : (
+              <>
+                <span><i style={{ background: '#16a34a' }} /> Start</span>
+                <span><i style={{ background: '#2563eb' }} /> Route point</span>
+                <span><i style={{ background: '#f59e0b' }} /> Stop</span>
+                <span><i style={{ background: '#dc2626' }} /> End/latest</span>
+              </>
+            )}
           </div>
         </div>
-
-        {/* Right Col: Selected User Hardware Matrix */}
-        <div className="border border-slate-800 bg-[#0B1120] rounded-lg p-4 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-xs text-white">{selectedUser?.full_name || 'Device Diagnostics'}</h3>
-                <p className="text-[10px] text-[#6B7280] font-mono">{selectedUser?.device_model || 'Android Telemetry'}</p>
-              </div>
-              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
-                {selectedUser?.department_name}
-              </span>
-            </div>
-
-            {/* Hardware Metrics Table / Grid */}
-            <div className="space-y-3 pt-3 text-xs">
-              {/* Battery */}
-              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
-                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <Battery className="w-3.5 h-3.5 text-[#16A34A]" /> Battery Status
-                  </span>
-                  <span className="font-mono text-[#86EFAC] font-bold">{telemetry.battery_level}%</span>
-                </div>
-                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
-                  <span>State: {telemetry.battery_status}</span>
-                  <span>Temp: {telemetry.battery_temperature}°C</span>
-                  <span>Health: {telemetry.battery_health}</span>
-                </div>
-              </div>
-
-              {/* Sound & Ringer */}
-              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
-                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <Volume2 className="w-3.5 h-3.5 text-amber-400" /> Device Sound
-                  </span>
-                  <span className="font-mono text-white font-bold">{telemetry.sound_volume}%</span>
-                </div>
-                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
-                  <span>Mode: {telemetry.sound_mode}</span>
-                  <span>Ringer: Active</span>
-                </div>
-              </div>
-
-              {/* RAM Usage */}
-              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
-                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <Cpu className="w-3.5 h-3.5 text-blue-400" /> R.A.M Pressure
-                  </span>
-                  <span className="font-mono text-white font-bold">{telemetry.ram_usage_pct}%</span>
-                </div>
-                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
-                  <span>Used: {telemetry.ram_used_gb} GB</span>
-                  <span>Total: {telemetry.ram_total_gb} GB</span>
-                </div>
-              </div>
-
-              {/* Storage */}
-              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
-                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <HardDrive className="w-3.5 h-3.5 text-purple-400" /> Internal Storage
-                  </span>
-                  <span className="font-mono text-white font-bold">{telemetry.storage_free_pct}% Free</span>
-                </div>
-                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
-                  <span>Used: {telemetry.storage_used_gb} GB</span>
-                  <span>Free: {telemetry.storage_free_gb} GB</span>
-                </div>
-              </div>
-
-              {/* Brightness */}
-              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
-                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <Sun className="w-3.5 h-3.5 text-amber-300" /> Display Brightness
-                  </span>
-                  <span className="font-mono text-white font-bold">{telemetry.brightness_level}%</span>
-                </div>
-                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
-                  <span>Auto-Adaptive: {telemetry.brightness_auto ? 'Yes' : 'No'}</span>
-                  <span>Anti-Glance: Active</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-2 rounded bg-slate-900/60 border border-slate-800 text-[10px] text-[#6B7280] flex items-center justify-between">
-            <span>Hardware Lock ID:</span>
-            <span className="font-mono text-slate-300">{selectedUser?.device_uuid ? `${selectedUser.device_uuid.slice(0, 12)}...` : 'N/A'}</span>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

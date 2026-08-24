@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { prisma } from '@perzent/database';
-import type { Role } from '@prisma/client';
 import { NextResponse } from 'next/server';
+
+export type Role = 'OWNER' | 'MANAGER' | 'EMPLOYEE';
 
 const SESSION_COOKIE = 'perzent_session';
 const SESSION_DAYS = 30;

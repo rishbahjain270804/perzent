@@ -1,5 +1,4 @@
 import { prisma } from '@perzent/database';
-import type { Prisma } from '@prisma/client';
 
 export function normalizeIndianPhone(phone: string) {
   const digits = phone.replace(/\D/g, '');
@@ -10,7 +9,7 @@ export async function markPaymentPaidAndProvision(
   orderId: string,
   payment: { paymentMethod?: string; bankReference?: string }
 ) {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  return prisma.$transaction(async (tx: any) => {
     const transaction = await tx.paymentTransaction.findUnique({ where: { order_id: orderId } });
     if (!transaction) throw new Error('Order not found in payment ledger');
 
