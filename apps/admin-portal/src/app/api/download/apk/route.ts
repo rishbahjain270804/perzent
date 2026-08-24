@@ -4,7 +4,26 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-const fileName = 'perzent-employee-v1.1.2.apk';
+function getLatestApkFilename(): string {
+  const downloadsDir = path.join(process.cwd(), 'public', 'downloads');
+  if (!fs.existsSync(downloadsDir)) return 'perzent-employee-v1.1.2.apk';
+
+  const files = fs.readdirSync(downloadsDir).filter((f) => f.endsWith('.apk'));
+  if (files.length === 0) return 'perzent-employee-v1.1.2.apk';
+
+  // Sort files by mtime (newest first) or preference
+  files.sort((a, b) => {
+    try {
+      const statA = fs.statSync(path.join(downloadsDir, a));
+      const statB = fs.statSync(path.join(downloadsDir, b));
+      return statB.mtimeMs - statA.mtimeMs;
+    } catch {
+      return 0;
+    }
+  });
+
+  return files[0];
+}
 
 function getArtifactUrl() {
   const value = process.env.EMPLOYEE_APK_URL;
@@ -17,14 +36,13 @@ function getArtifactUrl() {
 }
 
 function getLocalArtifactPath() {
-  const primary = path.join(process.cwd(), 'public', 'downloads', fileName);
+  const latestFile = getLatestApkFilename();
+  const primary = path.join(process.cwd(), 'public', 'downloads', latestFile);
   if (fs.existsSync(primary)) return primary;
-  const latest = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-latest.apk');
-  if (fs.existsSync(latest)) return latest;
-  const v3 = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-v3.0.0.apk');
-  if (fs.existsSync(v3)) return v3;
-  const legacy = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-v1.1.1.apk');
-  if (fs.existsSync(legacy)) return legacy;
+
+  const fallback = path.join(process.cwd(), 'public', 'downloads', 'perzent-employee-latest.apk');
+  if (fs.existsSync(fallback)) return fallback;
+
   return primary;
 }
 
@@ -32,7 +50,8 @@ async function hasPublishedArtifact(request: Request) {
   if (getArtifactUrl() || fs.existsSync(getLocalArtifactPath())) return true;
 
   try {
-    const response = await fetch(new URL(`/downloads/${fileName}`, request.url), {
+    const latestFile = getLatestApkFilename();
+    const response = await fetch(new URL(`/downloads/${latestFile}`, request.url), {
       method: 'HEAD',
       cache: 'no-store',
     });
@@ -60,8 +79,9 @@ export async function GET(request: Request) {
   const artifactUrl = getArtifactUrl();
   if (artifactUrl) return NextResponse.redirect(artifactUrl, 307);
 
+  const latestFile = getLatestApkFilename();
   if (await hasPublishedArtifact(request)) {
-    return NextResponse.redirect(new URL(`/downloads/${fileName}`, request.url), 307);
+    return NextResponse.redirect(new URL(`/downloads/${latestFile}`, request.url), 307);
   }
 
   return NextResponse.json(

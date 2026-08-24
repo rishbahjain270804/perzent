@@ -20,12 +20,22 @@ import {
 export default function DownloadPage() {
   const [downloadStarted, setDownloadStarted] = useState(false);
   const [apkStatus, setApkStatus] = useState<'checking' | 'available' | 'missing'>('checking');
+  const [versionInfo, setVersionInfo] = useState<{ latest_version: string; latest_version_code: number } | null>(null);
   const apkAvailable = apkStatus === 'available';
 
   useEffect(() => {
     fetch('/api/download/apk', { method: 'HEAD', cache: 'no-store' })
       .then((response) => setApkStatus(response.ok ? 'available' : 'missing'))
       .catch(() => setApkStatus('missing'));
+
+    fetch('/api/mobile/version', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.latest_version) {
+          setVersionInfo(data);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const handleDownloadApk = () => {
@@ -34,7 +44,7 @@ export default function DownloadPage() {
     // Trigger direct APK file download
     const link = document.createElement('a');
     link.href = '/api/download/apk';
-    link.download = 'perzent-employee-v1.1.2.apk';
+    link.download = `perzent-employee-v${versionInfo?.latest_version || '1.1.2'}.apk`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -72,7 +82,7 @@ export default function DownloadPage() {
         {/* Banner */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-slate-800 bg-slate-900/80 text-[#86EFAC] text-[11px] font-medium">
-            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android App • Version 1.1.2 (Build #4)
+            <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> Android App • Version {versionInfo?.latest_version || '1.1.2'} (Build #{versionInfo?.latest_version_code || 4})
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
             Download Perzent Field Employee App

@@ -355,12 +355,6 @@ export default function DutyDashboardScreen({
     );
   };
 
-  const formatDuration = (totalSeconds: number) => {
-    const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
-    const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
-    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  };
 
   const statusLabel = shiftStatus === 'CHECKED_IN'
     ? 'On duty'
@@ -532,7 +526,9 @@ export default function DutyDashboardScreen({
           <View style={styles.appVersionCard}>
             <View style={styles.appVersionInfo}>
               <Text style={styles.appVersionTitle}>Perzent Workforce</Text>
-              <Text style={styles.appVersionSubtitle}>Version 1.1.2 (Build #4)</Text>
+              <Text style={styles.appVersionSubtitle}>
+                Version {AutoUpdateService.getCurrentVersion().version} (Build #{AutoUpdateService.getCurrentVersion().versionCode})
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.checkUpdateButton}
