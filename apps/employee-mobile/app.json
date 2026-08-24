@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Perzent Field Employee",
+    "slug": "perzent-employee",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": ["location", "fetch"],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Perzent requires continuous background location during active work shifts to record field routes and client visit dwell times.",
+        "NSLocationWhenInUseUsageDescription": "Perzent requires your location to stamp shift check-in and check-out coordinates."
+      }
+    },
+    "android": {
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    }
+  }
+}

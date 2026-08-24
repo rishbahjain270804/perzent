@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum ShiftStatus {
+  CHECKED_IN
+  ON_BREAK
+  CHECKED_OUT
+  AUTO_CHECKED_OUT
+}
+
+enum PunchBy {
+  EMPLOYEE
+  MANAGER
+  OWNER
+  AUTO_SYSTEM
+}
+
+enum BreakType {
+  LUNCH
+  TEA
+  GENERAL
+}
+
+enum BreakEndedBy {
+  EMPLOYEE
+  AUTO_TIMEOUT_30MIN
+  MANAGER
+}
+
+enum TamperEventType {
+  GPS_DISABLED
+  PERMISSION_REVOKED
+  MOCK_LOCATION_DETECTED
+}
+
+model Company {
+  id                         String         @id @default(uuid())
+  name                       String
+  owner_email                String         @unique
+  timezone                   String         @default("Asia/Kolkata")
+  auto_checkout_time         String         @default("23:40")
+  max_break_minutes          Int            @default(30)
+  route_retention_days       Int            @default(15)
+  attendance_retention_days  Int            @default(45)
+  plan_tier                  String         @default("FREE")
+  created_at                 DateTime       @default(now())
+  updated_at                 DateTime       @updatedAt
+
+  users                      User[]
+  departments                Department[]
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  company_id  String
+  name        String
+  created_at  DateTime @default(now())
+
+  company     Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  users       User[]
+}
+
+model User {
+  id            String       @id @default(uuid())
+  company_id    String
+  department_id String?
+  manager_id    String?
+  full_name     String
+  email         String?
+  phone         String
+  password_hash String
+  role          Role         @default(EMPLOYEE)
+  designation   String
+  status        UserStatus   @default(ACTIVE)
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @updatedAt
+
+  company       Company      @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  department    Department?  @relation(fields: [department_id], references: [id], onDelete: SetNull)
+  manager       User?        @relation("ManagerSubordinates", fields: [manager_id], references: [id], onDelete: SetNull)
+  subordinates  User[]       @relation("ManagerSubordinates")
+  devices       UserDevice[]
+  attendances   AttendanceRecord[]
+  stops         LocationStop[]
+  waypoints     LocationWaypoint[]
+  tamper_logs   TamperLog[]
+
+  @@unique([company_id, phone])
+}
+
+model UserDevice {
+  id             String    @id @default(uuid())
+  user_id        String
+  device_uuid    String
+  device_model   String?
+  os_version     String?
+  fcm_token      String?
+  is_active      Boolean   @default(true)
+  last_seen_at   DateTime  @default(now())
+  created_at     DateTime  @default(now())
+
+  user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_uuid])
+}
+
+model AttendanceRecord {
+  id                       String       @id @default(uuid())
+  user_id                  String
+  work_date                DateTime     @db.Date
+  punch_in_time            DateTime
+  punch_out_time           DateTime?
+  punch_in_by              PunchBy      @default(EMPLOYEE)
+  punch_out_by             PunchBy?
+  punch_out_override_time  DateTime?
+  override_reason          String?
+  punch_in_lat             Float
+  punch_in_lng             Float
+  punch_out_lat            Float?
+  punch_out_lng            Float?
+  status                   ShiftStatus  @default(CHECKED_IN)
+  gross_worked_minutes     Int          @default(0)
+  total_break_minutes      Int          @default(0)
+  net_worked_minutes       Int          @default(0)
+  created_at               DateTime     @default(now())
+  updated_at               DateTime     @updatedAt
+
+  user                     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  breaks                   AttendanceBreak[]
+  stops                    LocationStop[]
+  waypoints                LocationWaypoint[]
+  tamper_logs              TamperLog[]
+}
+
+model AttendanceBreak {
+  id                String         @id @default(uuid())
+  attendance_id     String
+  break_type        BreakType      @default(LUNCH)
+  start_time        DateTime       @default(now())
+  end_time          DateTime?
+  duration_minutes  Int            @default(0)
+  ended_by          BreakEndedBy?
+  created_at        DateTime       @default(now())
+
+  attendance        AttendanceRecord @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
+}
+
+model LocationStop {
+  id                      String            @id @default(uuid())
+  attendance_id           String
+  user_id                 String
+  latitude                Float
+  longitude               Float
+  address_name            String?
+  start_time              DateTime
+  end_time                DateTime
+  dwell_duration_seconds  Int
+  created_at              DateTime          @default(now())
+
+  attendance              AttendanceRecord  @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
+  user                    User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model LocationWaypoint {
+  id             String            @id @default(uuid())
+  attendance_id  String
+  user_id        String
+  latitude       Float
+  longitude      Float
+  speed          Float             @default(0)
+  heading        Float             @default(0)
+  accuracy       Float
+  recorded_at    DateTime          @default(now())
+
+  attendance     AttendanceRecord  @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model TamperLog {
+  id             String            @id @default(uuid())
+  attendance_id  String?
+  user_id        String
+  event_type     TamperEventType
+  details        String?
+  occurred_at    DateTime          @default(now())
+
+  attendance     AttendanceRecord? @relation(fields: [attendance_id], references: [id], onDelete: SetNull)
+  user           User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}

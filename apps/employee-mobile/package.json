@@ -1,0 +1,26 @@
+{
+  "name": "@perzent/employee-mobile",
+  "version": "1.0.0",
+  "main": "App.tsx",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@perzent/shared-types": "workspace:*",
+    "@perzent/location-engine": "workspace:*",
+    "react": "^18.3.1",
+    "react-native": "0.76.7",
+    "expo": "~52.0.0",
+    "expo-status-bar": "~2.0.0",
+    "lucide-react-native": "^0.475.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~18.3.12",
+    "typescript": "^5.7.3"
+  }
+}
