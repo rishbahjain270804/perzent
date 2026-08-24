@@ -14,6 +14,7 @@ type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 
 export default function DutyDashboardScreen({
   session,
+  deviceInfo,
   onLogout,
 }: {
   session: any;
@@ -31,13 +32,16 @@ export default function DutyDashboardScreen({
       const next = await DeviceIntegrityService.inspect();
       setReadiness(next);
       if (sendToOwner) {
-        await EmployeeApi.attendance(session, 'PATCH', next.telemetry).catch(() => undefined);
+        await EmployeeApi.attendance(session, 'PATCH', {
+          telemetry: next.telemetry,
+          device: deviceInfo,
+        }).catch(() => undefined);
       }
       return next;
     } catch {
       return null;
     }
-  }, [session]);
+  }, [deviceInfo, session]);
 
   useEffect(() => {
     EmployeeApi.attendance(session)
@@ -74,7 +78,10 @@ export default function DutyDashboardScreen({
   const verifiedReadiness = async () => {
     const next = await DeviceIntegrityService.inspect({ requestPermission: true, acquirePosition: true });
     setReadiness(next);
-    await EmployeeApi.attendance(session, 'PATCH', next.telemetry).catch(() => undefined);
+    await EmployeeApi.attendance(session, 'PATCH', {
+      telemetry: next.telemetry,
+      device: deviceInfo,
+    }).catch(() => undefined);
     if (!next.ready || !next.position) {
       const message = next.blockers.map((item) => `• ${item.message}`).join('\n');
       Alert.alert('Check-in blocked', message || 'A verified GPS position is required.');

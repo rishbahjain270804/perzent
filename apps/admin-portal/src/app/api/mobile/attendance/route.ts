@@ -135,10 +135,17 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE']);
-    const telemetry = await request.json();
+    const body = await request.json();
+    const telemetry = body.telemetry && typeof body.telemetry === 'object' ? body.telemetry : body;
+    const device = body.device && typeof body.device === 'object' ? body.device : null;
     await prisma.userDevice.updateMany({
       where: { user_id: session.userId, is_active: true },
-      data: { telemetry, last_seen_at: new Date() },
+      data: {
+        telemetry,
+        last_seen_at: new Date(),
+        ...(device?.device_model ? { device_model: String(device.device_model).slice(0, 160) } : {}),
+        ...(device?.os_version ? { os_version: String(device.os_version).slice(0, 80) } : {}),
+      },
     });
     return NextResponse.json({ success: true });
   } catch (error) {

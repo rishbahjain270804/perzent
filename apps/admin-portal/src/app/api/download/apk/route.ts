@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-const fileName = 'perzent-employee-v1.1.0.apk';
+const fileName = 'perzent-employee-v1.1.1.apk';
 
 function getArtifactUrl() {
   const value = process.env.EMPLOYEE_APK_URL;

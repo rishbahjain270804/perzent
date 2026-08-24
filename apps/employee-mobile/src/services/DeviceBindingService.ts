@@ -14,10 +14,19 @@ export class DeviceBindingService {
       deviceUuid = `install-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       await SecureStore.setItemAsync(this.INSTALLATION_KEY, deviceUuid);
     }
+    const manufacturer = Device.manufacturer?.trim();
+    const model = (Device.modelName || Device.designName || Device.productName)?.trim();
+    const alreadyIncludesManufacturer = Boolean(
+      manufacturer && model?.toLocaleLowerCase().includes(manufacturer.toLocaleLowerCase())
+    );
+    const deviceModel = [alreadyIncludesManufacturer ? null : manufacturer, model]
+      .filter(Boolean)
+      .join(' ');
+
     return {
       device_uuid: deviceUuid,
-      device_model: Device.modelName || 'Unknown device',
-      os_version: `${Platform.OS} ${Platform.Version}`,
+      device_model: deviceModel || 'Unknown Android device',
+      os_version: `${Device.osName || Platform.OS} ${Device.osVersion || Platform.Version}`,
     };
   }
 
