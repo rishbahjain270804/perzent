@@ -129,7 +129,7 @@ export default function DutyDashboardScreen({
     const complianceTimer = setInterval(() => {
       refreshReadiness(true);
       if (isManager) loadManagerTeam();
-    }, 30_000);
+    }, 15_000);
     return () => clearInterval(complianceTimer);
   }, [syncAttendanceState, refreshReadiness, isManager, loadManagerTeam]);
 
@@ -154,7 +154,7 @@ export default function DutyDashboardScreen({
     return () => clearInterval(timer);
   }, [shiftStatus, updateClocks]);
 
-  // Background waypoint ping while checked in with 2-minute stall tracking
+  // High-frequency 15-second background waypoint ping while checked in with 2-minute stall tracking
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
     const pingLocation = async () => {
@@ -163,11 +163,11 @@ export default function DutyDashboardScreen({
         await EmployeeApi.sendWaypoint(session, pos);
         setLastWaypointTime(Date.now());
       } catch {
-        // Silent failure for background blips
+        // Silent failure for transient background blips
       }
     };
     pingLocation();
-    const locInterval = setInterval(pingLocation, 60_000);
+    const locInterval = setInterval(pingLocation, 15_000);
 
     return () => clearInterval(locInterval);
   }, [shiftStatus, session]);
