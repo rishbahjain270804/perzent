@@ -7,7 +7,7 @@ import {
   Pause,
   Clock,
   Coffee,
-  Info,
+  RefreshCw,
 } from 'lucide-react';
 import { DailyRoutePlayback } from '@perzent/shared-types';
 
@@ -42,7 +42,7 @@ export default function RoutePlaybackPage() {
 
   useEffect(() => {
     let timer: any;
-    if (isPlaying && playback?.waypoints.length) {
+    if (isPlaying && playback?.waypoints?.length) {
       timer = setInterval(() => {
         setTimelineIndex((prev) => {
           if (prev >= playback.waypoints.length - 1) {
@@ -56,156 +56,155 @@ export default function RoutePlaybackPage() {
     return () => clearInterval(timer);
   }, [isPlaying, playback]);
 
-  const currentWpt = playback?.waypoints[timelineIndex];
+  const currentWpt = playback?.waypoints?.[timelineIndex];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl bg-slate-950 border border-slate-800">
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* Header with Filters */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <Route className="w-6 h-6 text-[#16A34A]" /> 15-Day Route Playback Visualizer
-          </h1>
-          <p className="text-xs text-[#6B7280] mt-1">
-            Minute-by-minute timeline scrubber with dwell stop durations & road-snapped polylines
+          <h1 className="text-base font-bold text-white tracking-tight">15-Day Route Playback & Dwell Stops</h1>
+          <p className="text-[11px] text-[#6B7280]">
+            Road-snapped breadcrumbs • Dwell time analysis • 2-minute GPS waypoints
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <label className="block text-[10px] uppercase font-bold text-[#6B7280] mb-1">Select Employee</label>
-            <select
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-              className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-[#16A34A]"
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedUser}
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="px-2.5 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white focus:outline-none focus:border-[#16A34A]"
+          >
+            <option value="user-amit-employee">Amit Patel (North Region)</option>
+            <option value="user-sneha-employee">Sneha Roy (East Region)</option>
+            <option value="user-vikram-employee">Vikram Singh (West Region)</option>
+          </select>
+
+          <input
+            type="date"
+            min={minDateStr}
+            max={maxDateStr}
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="px-2.5 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white focus:outline-none focus:border-[#16A34A]"
+          />
+        </div>
+      </div>
+
+      {/* 4-Cell Metric Summary Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 border border-slate-800 bg-[#0B1120] rounded-lg divide-y md:divide-y-0 md:divide-x divide-slate-800">
+        <div className="p-3.5">
+          <span className="text-[#6B7280] text-[11px]">Total Distance</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums">
+            {playback?.total_distance_km ? `${playback.total_distance_km.toFixed(1)} km` : '0.0 km'}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">Traversed route</span>
+        </div>
+
+        <div className="p-3.5">
+          <span className="text-[#86EFAC] text-[11px]">Recorded Dwell Stops</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">
+            {playback?.stops?.length || 0}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">&gt;2 min duration stops</span>
+        </div>
+
+        <div className="p-3.5">
+          <span className="text-blue-400 text-[11px]">GPS Waypoints</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-blue-400">
+            {playback?.waypoints?.length || 0}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">2-minute pings</span>
+        </div>
+
+        <div className="p-3.5">
+          <span className="text-amber-400 text-[11px]">History Retention</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-amber-400">15 Days</p>
+          <span className="text-[10px] text-[#6B7280]">Rolling window</span>
+        </div>
+      </div>
+
+      {/* Route Scrubber Bar */}
+      <div className="p-3 rounded-lg border border-slate-800 bg-[#0B1120] space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className="px-2.5 py-1 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold text-xs flex items-center gap-1.5 transition"
             >
-              <option value="user-amit-employee">Amit Kumar (Sales Exec)</option>
-              <option value="user-sneha-employee">Sneha Patel (Client Officer)</option>
-            </select>
+              {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              {isPlaying ? 'Pause' : 'Play Route'}
+            </button>
+            <span className="text-slate-300 font-mono text-[11px]">
+              {currentWpt ? new Date(currentWpt.recorded_at).toLocaleTimeString() : '00:00:00'}
+            </span>
           </div>
 
-          <div>
-            <label className="block text-[10px] uppercase font-bold text-[#6B7280] mb-1">
-              Date (Max 15-Day History)
-            </label>
-            <input
-              type="date"
-              min={minDateStr}
-              max={maxDateStr}
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-[#16A34A]"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 p-3.5 rounded-xl bg-[#16A34A]/10 border border-[#16A34A]/25 text-xs text-[#86EFAC]">
-        <Info className="w-4 h-4 text-[#16A34A] shrink-0" />
-        <span>
-          <strong className="text-white">Free Tier Policy:</strong> Route GPS trajectories and dwell stops are retained for 15 days. Older dates are automatically pruned by the 02:00 AM daily maintenance worker.
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
-        <div className="lg:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden shadow-2xl">
-          <div className="flex items-center justify-between z-10">
-            <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-xs backdrop-blur">
-              <span className="text-[#6B7280]">Total Distance:</span>{' '}
-              <strong className="text-white">{playback?.total_distance_km || 14.8} km</strong>
-            </div>
-
-            <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-xs backdrop-blur flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse"></span>
-              <span>Speed: {currentWpt?.speed || 0} km/h</span>
-            </div>
-          </div>
-
-          <div className="relative w-full h-full flex flex-col items-center justify-center my-6">
-            <div className="w-4/5 h-1 bg-gradient-to-r from-emerald-500 via-[#16A34A] to-green-400 rounded-full relative my-8">
-              {playback?.stops.map((stop, i) => {
-                const percent = (i / Math.max(1, (playback.stops.length || 1) - 1)) * 100;
-                return (
-                  <div
-                    key={stop.id}
-                    style={{ left: `${percent}%` }}
-                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex flex-col items-center group cursor-pointer"
-                  >
-                    <div className="w-6 h-6 rounded-full bg-[#16A34A] text-white font-extrabold text-[10px] flex items-center justify-center shadow-lg shadow-green-600/50 border-2 border-white">
-                      {i + 1}
-                    </div>
-                    <div className="mt-2 p-2 rounded-lg bg-slate-900/95 border border-slate-700 text-[10px] text-slate-200 whitespace-nowrap shadow-xl">
-                      <p className="font-bold text-white">{stop.address_name}</p>
-                      <p className="text-[#86EFAC]">Dwell: {stop.duration_minutes} mins</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="z-10 bg-slate-900/95 border border-slate-700 p-4 rounded-xl space-y-3 backdrop-blur">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-8 h-8 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white flex items-center justify-center transition shadow-md shadow-green-600/30"
-                >
-                  {isPlaying ? <Pause className="w-4 h-4 text-white" /> : <Play className="w-4 h-4 text-white ml-0.5" />}
-                </button>
-                <span className="font-semibold text-white">Playback Timeline</span>
-              </div>
-              <span className="text-[#6B7280]">
-                Waypoint {timelineIndex + 1} of {playback?.waypoints.length || 1}
-              </span>
-            </div>
-
-            <input
-              type="range"
-              min="0"
-              max={(playback?.waypoints.length || 1) - 1}
-              value={timelineIndex}
-              onChange={(e) => {
-                setTimelineIndex(Number(e.target.value));
-                setIsPlaying(false);
-              }}
-              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[#16A34A]"
-            />
-          </div>
+          <span className="text-[#6B7280] text-[11px] font-mono">
+            {timelineIndex + 1} of {playback?.waypoints?.length || 0} points
+          </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col overflow-hidden">
-          <h3 className="font-bold text-sm text-white mb-3 px-2 flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-[#16A34A]" /> Dwell Stops & Locations ({playback?.stops.length || 0})
-          </h3>
+        <input
+          type="range"
+          min="0"
+          max={Math.max(0, (playback?.waypoints?.length || 1) - 1)}
+          value={timelineIndex}
+          onChange={(e) => {
+            setIsPlaying(false);
+            setTimelineIndex(parseInt(e.target.value));
+          }}
+          className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#16A34A]"
+        />
+      </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-            {playback?.stops.map((stop, index) => (
-              <div key={stop.id} className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="w-5 h-5 rounded-md bg-[#16A34A]/20 text-[#86EFAC] font-bold text-[10px] flex items-center justify-center">
-                    {index + 1}
-                  </span>
-                  <span className="font-bold text-white text-sm truncate">{stop.address_name}</span>
-                </div>
-                <div className="space-y-1 text-[#6B7280] text-[11px]">
-                  <p className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-[#16A34A]" />
-                    {new Date(stop.start_time).toLocaleTimeString()} - {new Date(stop.end_time).toLocaleTimeString()}
-                  </p>
-                  <p className="text-[#86EFAC] font-semibold">Stay Duration: {stop.duration_minutes} minutes</p>
-                </div>
-              </div>
-            ))}
+      {/* Dense Tabular Dwell Stops Report */}
+      <div className="border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/40">
+          <span className="font-semibold text-xs text-white">Dwell Stops & Client Locations</span>
+          <span className="text-[11px] text-[#6B7280]">
+            {playback?.stops?.length || 0} recorded stops on {selectedDate}
+          </span>
+        </div>
 
-            {playback?.break_intervals.map((b, i) => (
-              <div key={i} className="p-3 rounded-xl bg-amber-950/20 border border-amber-800/30 text-xs">
-                <p className="font-semibold text-amber-400 flex items-center gap-1.5 mb-1">
-                  <Coffee className="w-3.5 h-3.5" /> Lunch Break (Personal Time)
-                </p>
-                <p className="text-[11px] text-[#6B7280]">Duration: {b.duration_minutes} mins (Tracking Paused)</p>
-              </div>
-            ))}
-          </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-900/60 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
+                <th className="px-4 py-2.5">Stop #</th>
+                <th className="px-4 py-2.5">Location / Client Site</th>
+                <th className="px-4 py-2.5">Arrival</th>
+                <th className="px-4 py-2.5">Departure</th>
+                <th className="px-4 py-2.5">Dwell Duration</th>
+                <th className="px-4 py-2.5 text-right">GPS Coordinates</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+              {playback?.stops?.map((stop, idx) => (
+                <tr key={stop.id || idx} className="hover:bg-slate-850/40 transition">
+                  <td className="px-4 py-2.5 font-mono font-bold text-[#86EFAC]">
+                    #{idx + 1}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <p className="font-semibold text-white leading-tight">{stop.address_name || 'Client Site'}</p>
+                    <p className="text-[10px] text-[#6B7280] leading-tight">Verified Stationary Pin</p>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                    {new Date(stop.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                    {new Date(stop.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono font-bold text-white">
+                    {stop.duration_minutes} mins
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[10px] text-slate-400">
+                    {stop.latitude.toFixed(4)}° N, {stop.longitude.toFixed(4)}° E
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

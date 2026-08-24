@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Lock, Phone, ArrowRight, ShieldCheck, UserCheck } from 'lucide-react';
+import { Lock, Phone, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,66 +40,62 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemo = (phone: string, role: string) => {
+  const fillDemo = (phone: string) => {
     setIdentifier(phone);
     setPassword('password123');
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4 py-12">
-      <div className="max-w-md w-full bg-slate-950 border border-slate-800 rounded-2xl p-8 shadow-2xl">
-        <div className="flex items-center gap-3 mb-8">
-          {/* Primary Logo: White on Green */}
-          <div className="w-11 h-11 rounded-xl bg-[#16A34A] flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-green-600/30">
-            P
-          </div>
-          {/* Secondary Version showcase */}
-          <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-extrabold text-xl text-[#111827] shadow-sm">
+    <div className="min-h-screen flex items-center justify-center bg-[#0B1120] px-4 text-slate-100 font-sans antialiased text-xs">
+      <div className="max-w-sm w-full border border-slate-800 bg-[#0F172A] rounded-lg p-6 space-y-4">
+        {/* Brand Header */}
+        <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+          <div className="w-7 h-7 rounded bg-[#16A34A] text-white font-bold text-sm flex items-center justify-center shrink-0">
             P
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">PERZENT PORTAL</h2>
-            <p className="text-xs text-[#6B7280]">Business Owner & Manager Authentication</p>
+            <h2 className="font-bold text-sm text-white leading-tight">PERZENT</h2>
+            <p className="text-[10px] text-[#6B7280] leading-tight">Manager & Owner Access</p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          <div className="p-2.5 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-xs">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-5">
+        <form onSubmit={handleLogin} className="space-y-3">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
-              Registered Phone or Email
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Registered Phone / Email
             </label>
             <div className="relative">
-              <Phone className="w-5 h-5 absolute left-3.5 top-3 text-[#6B7280]" />
+              <Phone className="w-3.5 h-3.5 absolute left-3 top-2 text-slate-500" />
               <input
                 type="text"
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="+91 98765 43210 or email"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-[#6B7280] focus:outline-none focus:border-[#16A34A] text-sm"
+                placeholder="+91 98765 43210"
+                className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A] text-xs"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
               Password
             </label>
             <div className="relative">
-              <Lock className="w-5 h-5 absolute left-3.5 top-3 text-[#6B7280]" />
+              <Lock className="w-3.5 h-3.5 absolute left-3 top-2 text-slate-500" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-[#6B7280] focus:outline-none focus:border-[#16A34A] text-sm"
+                placeholder="••••••••"
+                className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A] text-xs"
               />
             </div>
           </div>
@@ -107,44 +103,29 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold flex items-center justify-center gap-2 transition shadow-lg shadow-green-600/25 disabled:opacity-50"
+            className="w-full py-2 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition"
           >
-            {loading ? 'Authenticating...' : 'Sign In to Dashboard'} <ArrowRight className="w-4 h-4 text-white" />
+            {loading ? 'Authenticating...' : 'Sign In'} <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800">
-          <p className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider mb-3">
-            Quick 1-Click Demo Accounts:
-          </p>
-          <div className="grid grid-cols-2 gap-2 text-xs">
+        {/* Demo Fast Fill */}
+        <div className="pt-2 border-t border-slate-800 space-y-1.5 text-[11px]">
+          <span className="text-[#6B7280]">Quick Demo Login:</span>
+          <div className="flex gap-2">
             <button
-              onClick={() => fillDemo('+919876543210', 'Owner')}
-              className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 hover:border-[#16A34A] text-left text-slate-300 transition flex items-center gap-2"
+              onClick={() => fillDemo('+919876543210')}
+              className="flex-1 py-1 rounded border border-slate-800 bg-slate-900 text-slate-300 hover:text-white text-[10px]"
             >
-              <ShieldCheck className="w-4 h-4 text-[#16A34A]" />
-              <div>
-                <p className="font-semibold text-white">Rajesh (Owner)</p>
-                <p className="text-[10px] text-[#6B7280]">All Departments</p>
-              </div>
+              Rajesh (Owner)
             </button>
             <button
-              onClick={() => fillDemo('+919811122200', 'Manager')}
-              className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 hover:border-[#16A34A] text-left text-slate-300 transition flex items-center gap-2"
+              onClick={() => fillDemo('+919876543211')}
+              className="flex-1 py-1 rounded border border-slate-800 bg-slate-900 text-slate-300 hover:text-white text-[10px]"
             >
-              <UserCheck className="w-4 h-4 text-[#16A34A]" />
-              <div>
-                <p className="font-semibold text-white">Priya (Manager)</p>
-                <p className="text-[10px] text-[#6B7280]">North Sales Hub</p>
-              </div>
+              Priya (Manager)
             </button>
           </div>
-        </div>
-
-        <div className="mt-6 text-center">
-          <Link href="/register" className="text-xs text-[#86EFAC] hover:underline">
-            Need to register a new company? Click here
-          </Link>
         </div>
       </div>
     </div>

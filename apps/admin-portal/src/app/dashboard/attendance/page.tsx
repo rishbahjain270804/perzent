@@ -3,15 +3,17 @@ import { useState, useEffect } from 'react';
 import {
   CalendarCheck,
   UserCheck,
-  Info,
-  X,
   Coffee,
+  X,
+  RefreshCw,
+  Search,
 } from 'lucide-react';
 import { AttendanceSummary } from '@perzent/shared-types';
 
 export default function AttendancePage() {
   const [records, setRecords] = useState<AttendanceSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<AttendanceSummary | null>(null);
@@ -74,161 +76,217 @@ export default function AttendancePage() {
     fetchAttendance();
   };
 
+  const filteredRecords = records.filter(
+    (r) =>
+      r.user_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.work_date?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl bg-slate-950 border border-slate-800">
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <CalendarCheck className="w-6 h-6 text-[#16A34A]" /> 45-Day Attendance & Break Timesheet
-          </h1>
-          <p className="text-xs text-[#6B7280] mt-1">
-            Audit gross vs net work hours, lunch break deductions, and manager checkout overrides
+          <h1 className="text-base font-bold text-white tracking-tight">Attendance & Break Timesheets</h1>
+          <p className="text-[11px] text-[#6B7280]">
+            45-day auditable records • Gross vs Net work hours • Lunch break deductions • 11:40 PM auto-cutoff
           </p>
         </div>
-
-        <button
-          onClick={() => setShowCheckInModal(true)}
-          className="px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-2 transition shadow-lg shadow-green-600/25"
-        >
-          <UserCheck className="w-4 h-4 text-white" /> Manual Check-In Override
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchAttendance}
+            className="p-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 hover:text-white transition"
+            title="Refresh"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setShowCheckInModal(true)}
+            className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
+          >
+            <UserCheck className="w-3.5 h-3.5" /> Manual Check-In
+          </button>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 p-3.5 rounded-xl bg-[#16A34A]/10 border border-[#16A34A]/25 text-xs text-[#86EFAC]">
-        <Info className="w-4 h-4 text-[#16A34A] shrink-0" />
-        <span>
-          <strong className="text-white">Free Tier Policy:</strong> Attendance records and break logs are maintained for 45 days. Auto check-out activates nightly at 11:40 PM IST.
-        </span>
+      {/* 4-Cell Metric Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 border border-slate-800 bg-[#0B1120] rounded-lg divide-y md:divide-y-0 md:divide-x divide-slate-800">
+        <div className="p-3.5">
+          <span className="text-[#6B7280] text-[11px]">Today's Shifts</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums">{records.length}</p>
+          <span className="text-[10px] text-[#6B7280]">Punched logs</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-[#86EFAC] text-[11px]">Active In Progress</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">
+            {records.filter((r) => r.status === 'CHECKED_IN' || r.status === 'ON_BREAK').length}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">Currently on duty</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-amber-400 text-[11px]">Completed Shifts</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-amber-400">
+            {records.filter((r) => r.status === 'CHECKED_OUT' || r.status === 'AUTO_CHECKED_OUT').length}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">Signed off</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-blue-400 text-[11px]">Retention Policy</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-blue-400">45 Days</p>
+          <span className="text-[10px] text-[#6B7280]">Full audit trail</span>
+        </div>
       </div>
 
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      {/* Search Bar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search representative or date (YYYY-MM-DD)..."
+            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+          />
+        </div>
+        <span className="text-[11px] text-[#6B7280]">{filteredRecords.length} timesheet records</span>
+      </div>
+
+      {/* Dense Tabular Timesheet */}
+      <div className="border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900/80 text-[#6B7280] font-semibold uppercase tracking-wider border-b border-slate-800">
-              <tr>
-                <th className="px-6 py-4">Employee</th>
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Punch In</th>
-                <th className="px-6 py-4">Punch Out</th>
-                <th className="px-6 py-4">Gross Time</th>
-                <th className="px-6 py-4">Break Time</th>
-                <th className="px-6 py-4">Net Work Time</th>
-                <th className="px-6 py-4">Punched By</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-900/60 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
+                <th className="px-4 py-2.5">Date</th>
+                <th className="px-4 py-2.5">Representative</th>
+                <th className="px-4 py-2.5">Punch In</th>
+                <th className="px-4 py-2.5">Punch Out</th>
+                <th className="px-4 py-2.5">Gross (Hours)</th>
+                <th className="px-4 py-2.5">Break (Mins)</th>
+                <th className="px-4 py-2.5">Net Work</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80 text-slate-200">
-              {records.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-900/50 transition">
-                  <td className="px-6 py-4">
-                    <p className="font-bold text-white text-sm">{r.user_name}</p>
-                    <p className="text-[11px] text-[#6B7280]">ID: {r.user_id.slice(0, 10)}</p>
-                  </td>
-                  <td className="px-6 py-4 text-slate-300 font-medium">{r.work_date}</td>
-                  <td className="px-6 py-4 text-[#86EFAC] font-medium">
-                    {new Date(r.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                  <td className="px-6 py-4">
-                    {r.punch_out_time ? (
-                      <span className="text-slate-200 font-medium">
-                        {new Date(r.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        {r.punch_out_override_time && (
-                          <span className="block text-[10px] text-amber-400">Override: {r.punch_out_override_time}</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full bg-[#16A34A]/20 text-[#86EFAC] font-semibold text-[10px] border border-[#16A34A]/30">
-                        Active Shift
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-slate-300">
-                    {Math.floor(r.gross_worked_minutes / 60)}h {r.gross_worked_minutes % 60}m
-                  </td>
-                  <td className="px-6 py-4 text-amber-400 font-medium flex items-center gap-1">
-                    <Coffee className="w-3.5 h-3.5" /> {r.total_break_minutes}m
-                  </td>
-                  <td className="px-6 py-4 font-bold text-white">
-                    {Math.floor(r.net_worked_minutes / 60)}h {r.net_worked_minutes % 60}m
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-medium text-slate-300">
-                      {r.punch_out_by || r.punch_in_by}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {!r.punch_out_time && (
-                      <button
-                        onClick={() => {
-                          setSelectedRecord(r);
-                          setShowCheckoutModal(true);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium text-xs transition"
-                      >
-                        Force Check-Out
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+              {filteredRecords.map((rec) => {
+                const grossHours = (rec.gross_worked_minutes / 60).toFixed(1);
+                const netHours = (rec.net_worked_minutes / 60).toFixed(1);
+
+                return (
+                  <tr key={rec.id} className="hover:bg-slate-850/40 transition">
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-slate-400">{rec.work_date}</td>
+                    <td className="px-4 py-2.5 font-semibold text-white">{rec.user_name}</td>
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                      {new Date(rec.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                      {rec.punch_out_time
+                        ? new Date(rec.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : rec.status === 'AUTO_CHECKED_OUT'
+                        ? '11:40 PM (Auto)'
+                        : <span className="text-[#86EFAC]">In Progress</span>}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-slate-300">{grossHours}h</td>
+                    <td className="px-4 py-2.5 font-mono text-amber-400">{rec.total_break_minutes}m</td>
+                    <td className="px-4 py-2.5 font-mono font-bold text-white">{netHours}h</td>
+                    <td className="px-4 py-2.5">
+                      {rec.status === 'CHECKED_IN' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse"></span> Active
+                        </span>
+                      )}
+                      {rec.status === 'ON_BREAK' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <Coffee className="w-2.5 h-2.5" /> Lunch
+                        </span>
+                      )}
+                      {rec.status === 'CHECKED_OUT' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">
+                          Completed
+                        </span>
+                      )}
+                      {rec.status === 'AUTO_CHECKED_OUT' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400">
+                          11:40 PM Auto
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {rec.status === 'CHECKED_IN' || rec.status === 'ON_BREAK' ? (
+                        <button
+                          onClick={() => {
+                            setSelectedRecord(rec);
+                            setShowCheckoutModal(true);
+                          }}
+                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition"
+                        >
+                          Override Out
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-500">Locked</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Force Checkout Modal */}
       {showCheckoutModal && selectedRecord && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-base text-white">Force Check-Out Employee</h3>
-              <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="max-w-md w-full bg-[#0B1120] border border-slate-800 rounded-lg p-5 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="font-bold text-sm text-white">Manager Check-Out Override</h3>
+              <button onClick={() => setShowCheckoutModal(false)} className="p-1 rounded text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
               </button>
             </div>
-
-            <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-              If <strong>{selectedRecord.user_name}</strong> forgot to punch out (e.g. left midday at 2:00 PM), select their actual departure time. Points after this time will be excluded and remote tracking halted.
-            </p>
-
-            <form onSubmit={handleForceCheckout} className="space-y-4">
+            <form onSubmit={handleForceCheckout} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">
-                  Actual Departure Time
-                </label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Representative</label>
+                <input
+                  type="text"
+                  disabled
+                  value={selectedRecord.user_name}
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Effective Check-Out Time</label>
                 <input
                   type="time"
                   required
                   value={overrideTime}
                   onChange={(e) => setOverrideTime(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm"
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 />
               </div>
-
               <div>
-                <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">
-                  Reason for Manual Checkout
-                </label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Reason for Override</label>
                 <textarea
                   required
                   rows={2}
                   value={overrideReason}
                   onChange={(e) => setOverrideReason(e.target.value)}
-                  placeholder="e.g. Employee left early for personal emergency"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs"
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 />
               </div>
-
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCheckoutModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-medium text-slate-300"
+                  className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold text-white shadow-lg shadow-red-500/20"
+                  className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold"
                 >
                   Confirm Force Check-Out
                 </button>
@@ -238,65 +296,62 @@ export default function AttendancePage() {
         </div>
       )}
 
+      {/* Manual Check-In Modal */}
       {showCheckInModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-base text-white">Manual Check-In on Behalf of Employee</h3>
-              <button onClick={() => setShowCheckInModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="max-w-md w-full bg-[#0B1120] border border-slate-800 rounded-lg p-5 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="font-bold text-sm text-white">Manual Punch-In Override</h3>
+              <button onClick={() => setShowCheckInModal(false)} className="p-1 rounded text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
               </button>
             </div>
-
-            <form onSubmit={handleManualCheckIn} className="space-y-4">
+            <form onSubmit={handleManualCheckIn} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Select Employee</label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Representative</label>
                 <select
                   value={manualUserId}
                   onChange={(e) => setManualUserId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm"
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 >
-                  <option value="user-amit-employee">Amit Kumar (Field Sales)</option>
-                  <option value="user-sneha-employee">Sneha Patel (Client Officer)</option>
+                  <option value="user-amit-employee">Amit Patel (North Region)</option>
+                  <option value="user-sneha-employee">Sneha Roy (East Region)</option>
+                  <option value="user-vikram-employee">Vikram Singh (West Region)</option>
                 </select>
               </div>
-
               <div>
-                <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Shift Start Time</label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Punch-In Time</label>
                 <input
                   type="time"
                   required
                   value={manualTime}
                   onChange={(e) => setManualTime(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm"
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 />
               </div>
-
               <div>
-                <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Reason</label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Justification Reason</label>
                 <textarea
                   required
                   rows={2}
                   value={manualReason}
                   onChange={(e) => setManualReason(e.target.value)}
-                  placeholder="e.g. Employee phone was uncharged upon arrival"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs"
+                  className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs"
                 />
               </div>
-
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCheckInModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-medium text-slate-300"
+                  className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-xs font-semibold text-white shadow-lg shadow-green-600/25"
+                  className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold"
                 >
-                  Save Manual Punch-In
+                  Save Manual Check-In
                 </button>
               </div>
             </form>

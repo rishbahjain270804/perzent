@@ -10,9 +10,8 @@ import {
   Sun,
   HardDrive,
   Cpu,
-  ShieldCheck,
   Smartphone,
-  Zap,
+  CheckCircle2,
 } from 'lucide-react';
 import { LiveTeamMember } from '@perzent/shared-types';
 
@@ -68,389 +67,176 @@ export default function LiveMapPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl bg-slate-950 border border-slate-800">
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            {/* Primary Logo: White on Green (#16A34A) */}
-            <div className="w-9 h-9 rounded-xl bg-[#16A34A] flex items-center justify-center font-bold text-white shadow-md shadow-green-600/30">
-              <MapPin className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Live Workforce & Hardware Telemetry Map</h1>
-              <p className="text-xs text-[#6B7280]">
-                Sub-meter GPS tracking • Live Device Sound, Brightness, Storage, RAM & Battery Status • Refreshed at {lastRefreshed}
-              </p>
-            </div>
-          </div>
+          <h1 className="text-base font-bold text-white tracking-tight">Live Fleet Map & Device Matrix</h1>
+          <p className="text-[11px] text-[#6B7280]">
+            Continuous GPS coordinates • Live Sound, Brightness, Storage, RAM & Battery telemetry • Updated {lastRefreshed}
+          </p>
         </div>
-
-        {/* Primary Green Button (#16A34A) with #FFFFFF text */}
         <button
           onClick={fetchLiveTeam}
           disabled={loading}
-          className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-2 transition shadow-lg shadow-green-600/20 disabled:opacity-50"
+          className="p-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 hover:text-white transition inline-flex items-center gap-1 text-xs"
         >
-          <RefreshCw className={`w-3.5 h-3.5 text-white ${loading ? 'animate-spin' : ''}`} /> Refresh Telemetry Feed
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
 
-      {/* Main Grid: Live Map + Team Roster */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[580px]">
-        {/* Live Map Canvas */}
-        <div className="lg:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 relative overflow-hidden flex flex-col justify-between p-6 shadow-2xl">
-          {/* Top Map Bar */}
-          <div className="flex items-center justify-between z-10">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-xs backdrop-blur">
-              <span className="font-semibold text-slate-300">Tracking Legend:</span>
-              <span className="flex items-center gap-1 text-[#16A34A] font-medium">
-                <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse"></span> Active Moving
+      {/* Main Grid: Map & Telemetry Details */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[500px]">
+        {/* Left 2 Cols: Interactive Map Simulation */}
+        <div className="lg:col-span-2 border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden flex flex-col">
+          <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between text-xs">
+            <span className="font-semibold text-white">Live Field Position Canvas</span>
+            {selectedUser && (
+              <span className="text-[#86EFAC] font-mono text-[11px]">
+                {selectedUser.current_location?.latitude.toFixed(4)}° N, {selectedUser.current_location?.longitude.toFixed(4)}° E
               </span>
-              <span className="flex items-center gap-1 text-amber-400 ml-2 font-medium">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span> Stationary (Desk)
-              </span>
-              <span className="flex items-center gap-1 text-blue-400 ml-2 font-medium">
-                <Coffee className="w-3 h-3 text-blue-400" /> Lunch Break (Paused)
-              </span>
-            </div>
-
-            <span className="px-3 py-1.5 rounded-xl bg-[#16A34A]/15 border border-[#16A34A]/30 text-[#86EFAC] text-xs font-semibold flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-ping"></span> Live Sector 62 & 18 Hub
-            </span>
+            )}
           </div>
 
-          {/* Radar Circles */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
-            <div className="w-[600px] h-[600px] rounded-full border border-green-500/25 flex items-center justify-center">
-              <div className="w-[400px] h-[400px] rounded-full border border-green-500/35 flex items-center justify-center">
-                <div className="w-[200px] h-[200px] rounded-full border border-green-500/45"></div>
-              </div>
-            </div>
-          </div>
+          <div className="flex-1 bg-slate-950 p-4 relative flex flex-col justify-between">
+            {/* Map Grid Visualization */}
+            <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40"></div>
 
-          {/* Map Node Pins */}
-          <div className="relative w-full h-full flex items-center justify-center">
-            {team.map((member, idx) => {
-              const isSelected = selectedUser?.user_id === member.user_id;
-              const posX = 20 + ((idx * 37 + 15) % 65);
-              const posY = 25 + ((idx * 29 + 20) % 55);
-
-              return (
-                <div
-                  key={member.user_id}
-                  onClick={() => setSelectedUser(member)}
-                  style={{ top: `${posY}%`, left: `${posX}%` }}
-                  className="absolute cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-110 pointer-events-auto"
-                >
-                  <div
-                    className={`relative flex items-center gap-2.5 p-2 rounded-2xl border shadow-xl transition backdrop-blur ${
-                      member.shift_status === 'ON_BREAK'
-                        ? 'bg-amber-950/85 border-amber-500/60 text-amber-300'
-                        : member.is_moving
-                        ? 'bg-green-950/85 border-[#16A34A]/80 text-green-300'
-                        : 'bg-slate-900/90 border-slate-700 text-slate-200'
-                    } ${isSelected ? 'ring-2 ring-[#16A34A] scale-105 shadow-green-600/30' : ''}`}
-                  >
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-white ${
-                        member.shift_status === 'ON_BREAK'
-                          ? 'bg-amber-600'
-                          : member.is_moving
-                          ? 'bg-[#16A34A]'
-                          : 'bg-slate-700'
-                      }`}
-                    >
-                      {member.shift_status === 'ON_BREAK' ? (
-                        <Coffee className="w-4 h-4 text-white" />
-                      ) : member.is_moving ? (
-                        <Navigation className="w-4 h-4 text-white rotate-45" />
-                      ) : (
-                        member.full_name.charAt(0)
-                      )}
-                    </div>
-                    <div className="pr-1 text-left">
-                      <p className="font-bold text-xs text-white leading-tight">{member.full_name}</p>
-                      <p className="text-[10px] text-slate-300">
-                        {member.shift_status === 'ON_BREAK'
-                          ? 'Lunch Break'
-                          : member.is_moving
-                          ? 'Moving • 35 km/h'
-                          : `Dwell: ${member.dwell_minutes}m`}
-                      </p>
-                    </div>
-                  </div>
+            {/* Selected Representative Pin Box */}
+            {selectedUser && (
+              <div className="relative z-10 max-w-sm p-3 rounded border border-slate-800 bg-[#0B1120]/95 space-y-1.5 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-xs">{selectedUser.full_name}</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
+                    {selectedUser.shift_status === 'CHECKED_IN' ? 'On Duty' : 'On Break'}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Quick Bottom User Bar */}
-          {selectedUser && (
-            <div className="z-10 p-3.5 rounded-xl bg-slate-900/95 border border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 backdrop-blur">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#16A34A] text-white font-bold flex items-center justify-center text-sm shadow-md shadow-green-600/30">
-                  {selectedUser.full_name.charAt(0)}
-                </div>
-                <div>
-                  <h4 className="font-bold text-sm text-white">{selectedUser.full_name}</h4>
-                  <p className="text-xs text-[#6B7280]">
-                    {selectedUser.designation} • {selectedUser.department_name}
-                  </p>
+                <p className="text-[11px] text-slate-300 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                  {selectedUser.current_location?.address_name || 'Delhi NCR Region'}
+                </p>
+                <div className="flex items-center gap-3 text-[10px] text-[#6B7280] font-mono pt-1 border-t border-slate-800">
+                  <span>Dwell: {selectedUser.dwell_minutes}m</span>
+                  <span>Accuracy: ±4.2m</span>
+                  <span>Battery: {selectedUser.battery_level}%</span>
                 </div>
               </div>
+            )}
 
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1.5 text-slate-300">
-                  <MapPin className="w-4 h-4 text-[#16A34A]" />
-                  <span>{selectedUser.current_location?.address_name || 'Sector 62, Noida'}</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-300">
-                  <Battery className="w-4 h-4 text-emerald-400" />
-                  <span>{selectedUser.battery_level}%</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Active Team List */}
-        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h3 className="font-bold text-sm text-white">Active Field Team ({team.length})</h3>
-            <span className="text-[10px] text-[#6B7280]">Click to view telemetry</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {team.map((member) => {
-              const isSelected = selectedUser?.user_id === member.user_id;
-              const memTelemetry = member.telemetry;
-
-              return (
-                <div
-                  key={member.user_id}
-                  onClick={() => setSelectedUser(member)}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-xs ${
-                    isSelected
-                      ? 'bg-green-950/40 border-[#16A34A] ring-1 ring-[#16A34A]/50'
-                      : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+            {/* Team Position Markers Strip */}
+            <div className="relative z-10 grid grid-cols-3 gap-2 mt-auto pt-4">
+              {team.map((m) => (
+                <button
+                  key={m.user_id}
+                  onClick={() => setSelectedUser(m)}
+                  className={`p-2 rounded border text-left text-xs transition ${
+                    selectedUser?.user_id === m.user_id
+                      ? 'border-[#16A34A] bg-[#16A34A]/10 text-white'
+                      : 'border-slate-800 bg-[#0B1120] text-slate-400 hover:text-white'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-bold text-white text-sm">{member.full_name}</span>
-                    {member.shift_status === 'CHECKED_IN' && (
-                      <span className="px-2 py-0.5 rounded-md bg-[#16A34A]/20 text-[#86EFAC] text-[10px] font-semibold border border-[#16A34A]/30">
-                        Checked In
-                      </span>
-                    )}
-                    {member.shift_status === 'ON_BREAK' && (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 text-[10px] font-semibold flex items-center gap-1 border border-amber-500/30">
-                        <Coffee className="w-3 h-3" /> Lunch
-                      </span>
-                    )}
-                    {member.shift_status === 'CHECKED_OUT' && (
-                      <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 text-[10px]">
-                        Off Duty
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[#6B7280] truncate text-[11px]">{member.designation}</p>
+                  <p className="font-semibold truncate">{m.full_name}</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">{m.current_location?.address_name || 'En Route'}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
-                  {/* Quick Telemetry Indicators */}
-                  <div className="mt-2.5 grid grid-cols-4 gap-1 text-[10px] text-slate-300 pt-2 border-t border-slate-800/80">
-                    <span className="flex items-center gap-1" title="Sound Mode">
-                      🔊 {memTelemetry?.sound_volume ?? 75}%
-                    </span>
-                    <span className="flex items-center gap-1" title="Brightness">
-                      ☀️ {memTelemetry?.brightness_level ?? 80}%
-                    </span>
-                    <span className="flex items-center gap-1" title="RAM Usage">
-                      🧠 {memTelemetry?.ram_usage_pct ?? 57}%
-                    </span>
-                    <span className="flex items-center gap-1 text-right justify-end font-semibold text-[#86EFAC]" title="Battery">
-                      🔋 {member.battery_level}%
-                    </span>
-                  </div>
+        {/* Right Col: Selected User Hardware Matrix */}
+        <div className="border border-slate-800 bg-[#0B1120] rounded-lg p-4 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-xs text-white">{selectedUser?.full_name || 'Device Diagnostics'}</h3>
+                <p className="text-[10px] text-[#6B7280] font-mono">{selectedUser?.device_model || 'Android Telemetry'}</p>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
+                {selectedUser?.department_name}
+              </span>
+            </div>
+
+            {/* Hardware Metrics Table / Grid */}
+            <div className="space-y-3 pt-3 text-xs">
+              {/* Battery */}
+              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
+                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Battery className="w-3.5 h-3.5 text-[#16A34A]" /> Battery Status
+                  </span>
+                  <span className="font-mono text-[#86EFAC] font-bold">{telemetry.battery_level}%</span>
                 </div>
-              );
-            })}
+                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
+                  <span>State: {telemetry.battery_status}</span>
+                  <span>Temp: {telemetry.battery_temperature}°C</span>
+                  <span>Health: {telemetry.battery_health}</span>
+                </div>
+              </div>
+
+              {/* Sound & Ringer */}
+              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
+                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Volume2 className="w-3.5 h-3.5 text-amber-400" /> Device Sound
+                  </span>
+                  <span className="font-mono text-white font-bold">{telemetry.sound_volume}%</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
+                  <span>Mode: {telemetry.sound_mode}</span>
+                  <span>Ringer: Active</span>
+                </div>
+              </div>
+
+              {/* RAM Usage */}
+              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
+                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Cpu className="w-3.5 h-3.5 text-blue-400" /> R.A.M Pressure
+                  </span>
+                  <span className="font-mono text-white font-bold">{telemetry.ram_usage_pct}%</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
+                  <span>Used: {telemetry.ram_used_gb} GB</span>
+                  <span>Total: {telemetry.ram_total_gb} GB</span>
+                </div>
+              </div>
+
+              {/* Storage */}
+              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
+                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <HardDrive className="w-3.5 h-3.5 text-purple-400" /> Internal Storage
+                  </span>
+                  <span className="font-mono text-white font-bold">{telemetry.storage_free_pct}% Free</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
+                  <span>Used: {telemetry.storage_used_gb} GB</span>
+                  <span>Free: {telemetry.storage_free_gb} GB</span>
+                </div>
+              </div>
+
+              {/* Brightness */}
+              <div className="p-2.5 rounded border border-slate-800 bg-slate-900/50 space-y-1">
+                <div className="flex justify-between items-center text-[#6B7280] text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Sun className="w-3.5 h-3.5 text-amber-300" /> Display Brightness
+                  </span>
+                  <span className="font-mono text-white font-bold">{telemetry.brightness_level}%</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-[#6B7280] font-mono">
+                  <span>Auto-Adaptive: {telemetry.brightness_auto ? 'Yes' : 'No'}</span>
+                  <span>Anti-Glance: Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-2 rounded bg-slate-900/60 border border-slate-800 text-[10px] text-[#6B7280] flex items-center justify-between">
+            <span>Hardware Lock ID:</span>
+            <span className="font-mono text-slate-300">{selectedUser?.device_uuid ? `${selectedUser.device_uuid.slice(0, 12)}...` : 'N/A'}</span>
           </div>
         </div>
       </div>
-
-      {/* DETAILED LIVE HARDWARE TELEMETRY DASHBOARD (Sound, Brightness, Storage, RAM, Battery) */}
-      {selectedUser && (
-        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-5 shadow-2xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-white">
-                <Smartphone className="w-5 h-5 text-[#16A34A]" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-white">
-                  Live Hardware Telemetry Tracker: {selectedUser.full_name}
-                </h3>
-                <p className="text-xs text-[#6B7280]">
-                  Bound Device: <strong className="text-slate-300">{selectedUser.device_model}</strong> ({selectedUser.device_uuid}) • Anti-Tamper Verified
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#16A34A]/15 border border-[#16A34A]/30 text-[#86EFAC] text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-ping"></span> Real-Time Hardware Sync
-              </span>
-            </div>
-          </div>
-
-          {/* 5-Column Telemetry Matrix (Sound, Brightness, Storage, RAM, Battery) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* 1. SOUND STATUS */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280]">Device Sound</span>
-                  <div className="w-7 h-7 rounded-lg bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center">
-                    <Volume2 className="w-4 h-4 text-[#16A34A]" />
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-white">{telemetry.sound_volume}%</p>
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    telemetry.sound_mode === 'NORMAL'
-                      ? 'bg-[#16A34A]/20 text-[#86EFAC]'
-                      : telemetry.sound_mode === 'VIBRATE'
-                      ? 'bg-amber-500/20 text-amber-300'
-                      : 'bg-red-500/20 text-red-300'
-                  }`}>
-                    {telemetry.sound_mode} MODE
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3">
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
-                    style={{ width: `${telemetry.sound_volume}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-[#6B7280] mt-1.5">Ringer volume level</p>
-              </div>
-            </div>
-
-            {/* 2. BRIGHTNESS STATUS */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280]">Brightness</span>
-                  <div className="w-7 h-7 rounded-lg bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center">
-                    <Sun className="w-4 h-4 text-[#16A34A]" />
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-white">{telemetry.brightness_level}%</p>
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300">
-                    {telemetry.brightness_auto ? 'ADAPTIVE AUTO' : 'MANUAL'}
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3">
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
-                    style={{ width: `${telemetry.brightness_level}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-[#6B7280] mt-1.5">Display panel level</p>
-              </div>
-            </div>
-
-            {/* 3. STORAGE STATUS */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280]">Flash Storage</span>
-                  <div className="w-7 h-7 rounded-lg bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center">
-                    <HardDrive className="w-4 h-4 text-[#16A34A]" />
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-white">{telemetry.storage_free_pct}% <span className="text-xs font-medium text-[#6B7280]">Free</span></p>
-                <p className="text-[11px] text-slate-300 mt-1">
-                  {telemetry.storage_used_gb} / {telemetry.storage_total_gb} GB
-                </p>
-              </div>
-              <div className="mt-3">
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
-                    style={{ width: `${100 - telemetry.storage_free_pct}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-[#6B7280] mt-1.5">{telemetry.storage_free_gb} GB Available</p>
-              </div>
-            </div>
-
-            {/* 4. RAM MEMORY */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280]">R.A.M Usage</span>
-                  <div className="w-7 h-7 rounded-lg bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center">
-                    <Cpu className="w-4 h-4 text-[#16A34A]" />
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-white">{telemetry.ram_usage_pct}%</p>
-                <p className="text-[11px] text-slate-300 mt-1">
-                  {telemetry.ram_used_gb} / {telemetry.ram_total_gb} GB RAM
-                </p>
-              </div>
-              <div className="mt-3">
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
-                    style={{ width: `${telemetry.ram_usage_pct}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-[#6B7280] mt-1.5">Active RAM allocation</p>
-              </div>
-            </div>
-
-            {/* 5. BATTERY LIVE STATUS */}
-            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280]">Battery Live</span>
-                  <div className="w-7 h-7 rounded-lg bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center">
-                    <Battery className="w-4 h-4 text-[#16A34A]" />
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-[#86EFAC]">{telemetry.battery_level}%</p>
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    telemetry.battery_status === 'CHARGING'
-                      ? 'bg-[#16A34A]/20 text-[#86EFAC]'
-                      : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {telemetry.battery_status === 'CHARGING' ? '⚡ CHARGING' : 'DISCHARGING'}
-                  </span>
-                  <span className="text-[10px] text-[#6B7280]">{telemetry.battery_temperature}°C</span>
-                </div>
-              </div>
-              <div className="mt-3">
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      telemetry.battery_level > 30 ? 'bg-[#16A34A]' : 'bg-amber-500'
-                    }`}
-                    style={{ width: `${telemetry.battery_level}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-[#6B7280] mt-1.5">Health: {telemetry.battery_health || 'Good'}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

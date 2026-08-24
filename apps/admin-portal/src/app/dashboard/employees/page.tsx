@@ -11,10 +11,8 @@ import {
   Shield,
   CreditCard,
   Receipt,
-  Lock,
-  ArrowRight,
-  Sparkles,
-  QrCode,
+  Search,
+  RefreshCw,
 } from 'lucide-react';
 import {
   EMPLOYEE_BASE_PRICE_INR,
@@ -24,7 +22,7 @@ import {
 
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<any[]>([]);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [showCashfreeModal, setShowCashfreeModal] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'DETAILS' | 'CHECKOUT' | 'SUCCESS'>('DETAILS');
   const [currentOrder, setCurrentOrder] = useState<any>(null);
@@ -98,144 +96,193 @@ export default function EmployeesPage() {
         body: JSON.stringify({
           order_id: currentOrder.order_id,
           cf_payment_id: `cf_pay_${Date.now()}`,
+          payment_method: selectedMethod,
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setLastInvoice(data.transaction);
+      const verifyData = await res.json();
+      if (res.ok && verifyData.success) {
+        setLastInvoice(verifyData);
         setPaymentStep('SUCCESS');
         fetchEmployees();
-        setMessage(`Payment of ₹${EMPLOYEE_TOTAL_PRICE_INR} received via Cashfree! ${data.employee?.full_name} is now provisioned.`);
       } else {
-        alert(data.error || 'Cashfree payment verification failed');
+        alert(verifyData.error || 'Cashfree payment verification failed');
       }
     } catch (err: any) {
-      alert('Verification error: ' + err.message);
+      alert('Verification request failed: ' + err.message);
     } finally {
       setProcessingPayment(false);
     }
   };
 
   const handleResetDevice = async (userId: string) => {
-    if (!confirm('Are you sure you want to reset this device binding? The user will be able to bind a new smartphone on their next login.')) {
-      return;
-    }
-
+    if (!confirm('Are you sure you want to unbind this employee’s device lock?')) return;
     const res = await fetch('/api/employees', {
-      method: 'POST',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reset_device', user_id: userId }),
+      body: JSON.stringify({ id: userId, action: 'RESET_DEVICE' }),
     });
-
     if (res.ok) {
-      setMessage('Device binding reset successfully!');
+      setMessage('Device binding reset successfully.');
       fetchEmployees();
-      setTimeout(() => setMessage(''), 4000);
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
-  const openProvisionModal = () => {
-    setPaymentStep('DETAILS');
-    setCurrentOrder(null);
-    setShowAddModal(true);
-  };
+  const filteredEmployees = employees.filter(
+    (e) =>
+      e.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.designation?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl bg-slate-950 border border-slate-800">
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <Users className="w-6 h-6 text-[#16A34A]" /> Employee Roster & Device Provisioning
-          </h1>
-          <p className="text-xs text-[#6B7280] mt-1">
-            Pay-per-seat via Cashfree (₹99 + 18% GST = ₹116.82/rep) • Single physical device lock & hierarchy management
+          <h1 className="text-base font-bold text-white tracking-tight">Employee Directory & Seat Licenses</h1>
+          <p className="text-[11px] text-[#6B7280]">
+            Manage field representative profiles, device UUID locks, and provision seats (₹99 + 18% GST = ₹116.82)
           </p>
         </div>
-
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/billing"
-            className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition"
-          >
-            <Receipt className="w-4 h-4 text-[#86EFAC]" /> Billing & Invoices
-          </Link>
+        <div className="flex items-center gap-2">
           <button
-            onClick={openProvisionModal}
-            className="px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-2 transition shadow-lg shadow-green-600/25"
+            onClick={fetchEmployees}
+            className="p-1.5 rounded border border-slate-800 bg-slate-900 text-slate-400 hover:text-white transition"
+            title="Refresh List"
           >
-            <UserPlus className="w-4 h-4 text-white" /> Provision New Employee (₹116.82)
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              setPaymentStep('DETAILS');
+              setShowCashfreeModal(true);
+            }}
+            className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
+          >
+            <UserPlus className="w-3.5 h-3.5" /> Add Employee (₹116.82)
           </button>
         </div>
       </div>
 
       {message && (
-        <div className="p-3.5 rounded-xl bg-[#16A34A]/15 border border-[#16A34A]/30 text-xs text-[#86EFAC] font-semibold flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#16A34A]" /> {message}
-          </div>
-          <Link href="/dashboard/billing" className="text-xs text-white underline ml-4 font-normal">
-            View Invoices
-          </Link>
+        <div className="p-2.5 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] text-xs font-medium">
+          {message}
         </div>
       )}
 
-      {/* Roster Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      {/* 4-Cell Metric Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 border border-slate-800 bg-[#0B1120] rounded-lg divide-y md:divide-y-0 md:divide-x divide-slate-800">
+        <div className="p-3.5">
+          <span className="text-[#6B7280] text-[11px]">Total Employees</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums">{employees.length}</p>
+          <span className="text-[10px] text-[#6B7280]">Enrolled personnel</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-[#86EFAC] text-[11px]">Active Paid Seats</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-[#86EFAC]">{employees.length}</p>
+          <span className="text-[10px] text-[#6B7280]">Cashfree authorized</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-blue-400 text-[11px]">Bound Devices</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums text-blue-400">
+            {employees.filter((e) => e.device_uuid).length}
+          </p>
+          <span className="text-[10px] text-[#6B7280]">Hardware UUID locked</span>
+        </div>
+        <div className="p-3.5">
+          <span className="text-slate-400 text-[11px]">Base License Fee</span>
+          <p className="text-xl font-bold text-white mt-1 tabular-nums">₹99.00 <span className="text-[11px] text-slate-400 font-normal">+ 18% GST</span></p>
+          <span className="text-[10px] text-[#6B7280]">₹116.82 per seat</span>
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name, phone, or designation..."
+            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+          />
+        </div>
+        <span className="text-[11px] text-[#6B7280]">{filteredEmployees.length} representatives found</span>
+      </div>
+
+      {/* Dense Tabular Employee Directory */}
+      <div className="border border-slate-800 bg-[#0B1120] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900/80 text-[#6B7280] font-semibold uppercase tracking-wider border-b border-slate-800">
-              <tr>
-                <th className="px-6 py-4">Employee</th>
-                <th className="px-6 py-4">Phone / Login</th>
-                <th className="px-6 py-4">Role & Designation</th>
-                <th className="px-6 py-4">Department</th>
-                <th className="px-6 py-4">Assigned Manager</th>
-                <th className="px-6 py-4">Bound Hardware Device</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-900/60 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
+                <th className="px-4 py-2.5">Representative</th>
+                <th className="px-4 py-2.5">Phone & Email</th>
+                <th className="px-4 py-2.5">Designation</th>
+                <th className="px-4 py-2.5">Role</th>
+                <th className="px-4 py-2.5">Hardware Binding</th>
+                <th className="px-4 py-2.5">Seat Status</th>
+                <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80 text-slate-200">
-              {employees.map((emp) => (
-                <tr key={emp.id} className="hover:bg-slate-900/50 transition">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-xs">
-                        {emp.full_name.charAt(0)}
+            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+              {filteredEmployees.map((emp) => (
+                <tr key={emp.id} className="hover:bg-slate-850/40 transition">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-6 h-6 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px]">
+                        {emp.full_name?.charAt(0)}
                       </div>
-                      <div>
-                        <p className="font-bold text-white text-sm">{emp.full_name}</p>
-                        <p className="text-[11px] text-[#6B7280]">{emp.email || 'No email'}</p>
-                      </div>
+                      <span className="font-semibold text-white">{emp.full_name}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-slate-300 font-medium">{emp.phone}</td>
-                  <td className="px-6 py-4">
-                    <p className="font-medium text-slate-200">{emp.designation}</p>
-                    <span className="inline-flex items-center gap-1 text-[10px] text-[#86EFAC] font-semibold">
-                      <Shield className="w-3 h-3 text-[#16A34A]" /> {emp.role}
+                  <td className="px-4 py-2.5 font-mono text-[11px] text-slate-300">
+                    <p className="leading-tight">{emp.phone}</p>
+                    <p className="text-[10px] text-[#6B7280] leading-tight">{emp.email}</p>
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-300">{emp.designation || 'Field Representative'}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
+                      {emp.role}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-slate-300">{emp.department_name}</td>
-                  <td className="px-6 py-4 text-slate-300">{emp.manager_name}</td>
-                  <td className="px-6 py-4">
-                    {emp.is_device_bound ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#16A34A]/15 text-[#86EFAC] font-medium text-[11px] border border-[#16A34A]/30">
-                        <Smartphone className="w-3.5 h-3.5 text-[#16A34A]" /> {emp.device_info}
-                      </span>
+                  <td className="px-4 py-2.5">
+                    {emp.device_uuid ? (
+                      <div className="flex items-center gap-1.5 text-emerald-400">
+                        <Smartphone className="w-3.5 h-3.5" />
+                        <div>
+                          <p className="text-[11px] font-mono text-slate-300 leading-tight">{emp.device_model || 'Bound Device'}</p>
+                          <p className="text-[9px] text-[#6B7280] truncate max-w-[120px] font-mono">{emp.device_uuid}</p>
+                        </div>
+                      </div>
                     ) : (
-                      <span className="text-[#6B7280]">No Device Bound</span>
+                      <span className="text-[11px] text-slate-500 italic">No Device Bound</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    {emp.is_device_bound && (
+                  <td className="px-4 py-2.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
+                      <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid (₹116.82)
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right space-x-1">
+                    {emp.device_uuid && (
                       <button
                         onClick={() => handleResetDevice(emp.id)}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-medium text-xs transition flex items-center gap-1 ml-auto"
+                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition inline-flex items-center gap-1"
+                        title="Unbind Device Lock"
                       >
-                        <RotateCcw className="w-3 h-3" /> Reset Binding
+                        <RotateCcw className="w-3 h-3 text-amber-400" /> Reset
                       </button>
                     )}
+                    <Link
+                      href={`/dashboard/routes?user_id=${emp.id}`}
+                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition inline-flex items-center"
+                    >
+                      Routes
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -244,275 +291,189 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      {/* Cashfree Provisioning & Payment Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="max-w-xl w-full bg-slate-950 border border-slate-800 rounded-3xl p-7 shadow-2xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#16A34A] text-white flex items-center justify-center font-bold text-sm">
-                  CF
+      {/* Minimalist Cashfree Provisioning Modal */}
+      {showCashfreeModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="max-w-md w-full bg-[#0B1120] border border-slate-800 rounded-lg p-5 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded bg-[#16A34A] text-white font-bold flex items-center justify-center text-xs">
+                  P
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-white">Provision Field Rep Seat</h3>
-                  <p className="text-[11px] text-[#6B7280]">Powered by Cashfree Payments Gateway</p>
+                  <h3 className="font-bold text-sm text-white">Provision Field Seat</h3>
+                  <p className="text-[10px] text-[#6B7280]">Cashfree PG (₹99.00 + 18% GST)</p>
                 </div>
               </div>
               <button
-                onClick={() => setShowAddModal(false)}
-                className="w-8 h-8 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center"
+                onClick={() => setShowCashfreeModal(false)}
+                className="p-1 rounded text-slate-400 hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* STEP 1: Employee Form & Cashfree Pricing Breakdown */}
             {paymentStep === 'DETAILS' && (
-              <form onSubmit={handleInitiateCashfreePayment} className="space-y-4 pt-4">
+              <form onSubmit={handleInitiateCashfreePayment} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Full Name</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Full Name</label>
                   <input
                     type="text"
                     required
+                    placeholder="e.g. Ramesh Kumar"
                     value={formData.full_name}
                     onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                    placeholder="e.g. Rahul Sharma"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Phone (Login ID)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Phone (Login)</label>
                     <input
                       type="text"
                       required
+                      placeholder="+91 98765 43210"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="+91 98111 22299"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+                      className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Email (Optional)</label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      placeholder="rahul@acme.com"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Designation</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Designation</label>
                     <input
                       type="text"
                       required
+                      placeholder="Sales Representative"
                       value={formData.designation}
                       onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                      placeholder="e.g. Territory Sales Manager"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+                      className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Role</label>
-                    <select
-                      value={formData.role}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
-                    >
-                      <option value="EMPLOYEE">Field Employee</option>
-                      <option value="MANAGER">Manager</option>
-                    </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="ramesh@acmelogistics.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
+                  />
+                </div>
+
+                {/* Price Breakdown Box */}
+                <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-1.5 text-[11px]">
+                  <div className="flex justify-between text-slate-300">
+                    <span>Base Seat Fee:</span>
+                    <span className="font-mono">₹{EMPLOYEE_BASE_PRICE_INR.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#86EFAC]">
+                    <span>18% GST:</span>
+                    <span className="font-mono">+₹{GST_AMOUNT_INR.toFixed(2)}</span>
+                  </div>
+                  <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-xs text-white">
+                    <span>Total Amount Payable:</span>
+                    <span className="text-[#86EFAC] font-mono">₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}</span>
                   </div>
                 </div>
 
-                {/* Cashfree Transparent Price Breakdown Card */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 space-y-2.5 shadow-inner">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 flex items-center gap-1.5">
-                      <CreditCard className="w-3.5 h-3.5 text-[#16A34A]" /> 1x Employee Tracking Seat Add-on
-                    </span>
-                    <span className="font-semibold text-white">₹{EMPLOYEE_BASE_PRICE_INR.toFixed(2)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-[#6B7280]">GST / Government Taxes (18%)</span>
-                    <span className="font-semibold text-[#86EFAC]">+ ₹{GST_AMOUNT_INR.toFixed(2)}</span>
-                  </div>
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-white uppercase tracking-wider">Total Amount Payable</span>
-                      <p className="text-[10px] text-[#6B7280]">Includes 18% Tax • Instant Provisioning</p>
-                    </div>
-                    <span className="text-xl font-extrabold text-[#86EFAC]">
-                      ₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
+                <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 text-xs font-medium text-slate-400 hover:text-white"
+                    onClick={() => setShowCashfreeModal(false)}
+                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={processingPayment}
-                    className="px-6 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-xs font-bold text-white shadow-lg shadow-green-600/25 flex items-center gap-2 disabled:opacity-50 transition"
+                    className="px-4 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
                   >
-                    {processingPayment ? 'Initializing...' : `Proceed to Cashfree Checkout • ₹${EMPLOYEE_TOTAL_PRICE_INR}`}
-                    <ArrowRight className="w-4 h-4 text-white" />
+                    {processingPayment ? 'Connecting...' : 'Authorize & Pay ₹116.82'}
                   </button>
                 </div>
               </form>
             )}
 
-            {/* STEP 2: Cashfree Interactive PG Checkout Screen */}
             {paymentStep === 'CHECKOUT' && currentOrder && (
-              <div className="pt-4 space-y-5">
-                <div className="p-4 rounded-2xl bg-emerald-950/40 border border-[#16A34A]/30 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-[#86EFAC] font-semibold">Cashfree Order Active</p>
-                    <p className="text-xs font-bold text-white mt-0.5">Order ID: {currentOrder.order_id}</p>
-                    <p className="text-[10px] text-[#6B7280]">Session: {currentOrder.payment_session_id?.slice(0, 18)}...</p>
+              <div className="space-y-3">
+                <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-1 font-mono text-[11px]">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Cashfree Order:</span>
+                    <span className="text-white truncate max-w-[200px]">{currentOrder.order_id}</span>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-[#6B7280] uppercase font-bold">Total Payable</span>
-                    <p className="text-2xl font-black text-[#86EFAC]">₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase text-[#6B7280]">
-                    Select Cashfree Payment Option
-                  </label>
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMethod('UPI')}
-                      className={`p-3.5 rounded-xl border text-left transition flex flex-col justify-between ${
-                        selectedMethod === 'UPI'
-                          ? 'border-[#16A34A] bg-[#16A34A]/15 text-white font-bold'
-                          : 'border-slate-800 bg-slate-900 text-slate-400'
-                      }`}
-                    >
-                      <QrCode className="w-5 h-5 text-[#16A34A] mb-2" />
-                      <span>UPI & QR</span>
-                      <span className="text-[10px] font-normal text-slate-400">GPay, PhonePe, Paytm</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMethod('CARD')}
-                      className={`p-3.5 rounded-xl border text-left transition flex flex-col justify-between ${
-                        selectedMethod === 'CARD'
-                          ? 'border-[#16A34A] bg-[#16A34A]/15 text-white font-bold'
-                          : 'border-slate-800 bg-slate-900 text-slate-400'
-                      }`}
-                    >
-                      <CreditCard className="w-5 h-5 text-[#16A34A] mb-2" />
-                      <span>Credit / Debit Card</span>
-                      <span className="text-[10px] font-normal text-slate-400">Visa, Master, RuPay</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMethod('NETBANKING')}
-                      className={`p-3.5 rounded-xl border text-left transition flex flex-col justify-between ${
-                        selectedMethod === 'NETBANKING'
-                          ? 'border-[#16A34A] bg-[#16A34A]/15 text-white font-bold'
-                          : 'border-slate-800 bg-slate-900 text-slate-400'
-                      }`}
-                    >
-                      <Lock className="w-5 h-5 text-[#16A34A] mb-2" />
-                      <span>NetBanking</span>
-                      <span className="text-[10px] font-normal text-slate-400">HDFC, ICICI, SBI</span>
-                    </button>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Amount:</span>
+                    <span className="font-bold text-[#86EFAC]">₹{currentOrder.order_amount?.toFixed(2)}</span>
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-[#6B7280] flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-[#16A34A] shrink-0" />
-                  <span>256-bit Encrypted Cashfree PG v3 Checkout. Sub-merchant settlement active.</span>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">Payment Method</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['UPI', 'Card', 'NetBanking'].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setSelectedMethod(m)}
+                        className={`py-1.5 rounded border text-xs font-medium transition ${
+                          selectedMethod === m
+                            ? 'border-[#16A34A] bg-[#16A34A]/10 text-white font-semibold'
+                            : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex justify-between items-center pt-2">
+                <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentStep('DETAILS')}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 text-xs font-medium text-slate-400 hover:text-white"
+                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
                   >
-                    Back to Details
+                    Back
                   </button>
                   <button
-                    type="button"
-                    disabled={processingPayment}
                     onClick={handleCompleteCashfreePayment}
-                    className="px-6 py-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-xs font-bold text-white shadow-lg shadow-green-600/30 flex items-center gap-2 transition disabled:opacity-50"
+                    disabled={processingPayment}
+                    className="px-4 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
                   >
-                    {processingPayment ? 'Authorizing with Cashfree...' : `Authorize & Pay ₹${EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}`}
+                    {processingPayment ? 'Verifying...' : `Pay ₹${EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)} via Cashfree`}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* STEP 3: Payment Success & Invoice */}
             {paymentStep === 'SUCCESS' && lastInvoice && (
-              <div className="pt-6 text-center space-y-4">
-                <div className="w-14 h-14 rounded-2xl bg-[#16A34A]/20 text-[#86EFAC] flex items-center justify-center mx-auto border border-[#16A34A]/30">
-                  <CheckCircle2 className="w-8 h-8 text-[#16A34A]" />
+              <div className="space-y-3 text-center py-2">
+                <div className="w-10 h-10 rounded-full bg-[#16A34A]/20 text-[#16A34A] mx-auto flex items-center justify-center">
+                  <CheckCircle2 className="w-6 h-6 text-[#16A34A]" />
                 </div>
-
                 <div>
-                  <h4 className="text-xl font-bold text-white">Payment Successful & Employee Provisioned!</h4>
-                  <p className="text-xs text-[#6B7280] mt-1">
-                    Cashfree Transaction ID: <strong>{lastInvoice.bank_reference || lastInvoice.order_id}</strong>
+                  <h4 className="font-bold text-sm text-white">Employee Seat Provisioned!</h4>
+                  <p className="text-[11px] text-[#6B7280] mt-0.5">
+                    Invoice <span className="font-mono text-white">{lastInvoice.invoice_number}</span> recorded
                   </p>
                 </div>
-
-                <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left text-xs space-y-2 max-w-md mx-auto">
-                  <div className="flex justify-between">
-                    <span className="text-[#6B7280]">Invoice Number:</span>
-                    <span className="font-bold text-white">{lastInvoice.invoice_number}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#6B7280]">Employee Added:</span>
-                    <span className="font-semibold text-white">{lastInvoice.employee_name} ({lastInvoice.employee_phone})</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#6B7280]">Base Price:</span>
-                    <span className="text-slate-300">₹{lastInvoice.base_price?.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#6B7280]">GST (18%):</span>
-                    <span className="text-[#86EFAC]">+ ₹{lastInvoice.tax_amount?.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between pt-2 border-t border-slate-800 font-bold">
-                    <span className="text-white">Total Paid:</span>
-                    <span className="text-[#86EFAC]">₹{lastInvoice.total_amount?.toFixed(2)}</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-center gap-3 pt-2">
+                <div className="pt-2 flex justify-center gap-2">
                   <button
-                    onClick={() => setShowAddModal(false)}
-                    className="px-6 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-xs font-bold text-white shadow-lg shadow-green-600/25"
+                    onClick={() => setShowCashfreeModal(false)}
+                    className="px-4 py-1.5 rounded bg-[#16A34A] text-white text-xs font-semibold"
                   >
-                    Done & View Roster
+                    Done
                   </button>
                   <Link
                     href="/dashboard/billing"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200"
+                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
                   >
-                    View All Invoices
+                    View Invoices
                   </Link>
                 </div>
               </div>
@@ -523,4 +484,3 @@ export default function EmployeesPage() {
     </div>
   );
 }
-

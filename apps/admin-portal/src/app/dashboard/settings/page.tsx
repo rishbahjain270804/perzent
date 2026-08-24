@@ -7,6 +7,7 @@ import {
   Database,
   Save,
   CheckCircle2,
+  Globe,
 } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -26,120 +27,134 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-4xl space-y-6">
-      <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800">
-        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-          <Settings className="w-6 h-6 text-[#16A34A]" /> Organization Policies & Automation Rules
-        </h1>
-        <p className="text-xs text-[#6B7280] mt-1">
-          Configure end-of-day auto checkout cutoffs, break duration caps, and storage retention policies
-        </p>
+    <div className="max-w-4xl space-y-4 mx-auto text-xs">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-base font-bold text-white tracking-tight">Organization Policies & Automation Rules</h1>
+          <p className="text-[11px] text-[#6B7280]">
+            Configure daily shift cutoff cutoffs, break duration caps, and storage retention policies
+          </p>
+        </div>
       </div>
 
       {saved && (
-        <div className="p-3.5 rounded-xl bg-[#16A34A]/15 border border-[#16A34A]/30 text-xs text-[#86EFAC] font-semibold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#16A34A]" /> Policies successfully updated!
+        <div className="p-2.5 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] font-medium flex items-center gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" /> Policies successfully updated and applied across fleet.
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-6">
-        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#16A34A]/15 text-[#86EFAC] flex items-center justify-center">
-              <Clock className="w-5 h-5 text-[#16A34A]" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm text-white">Automated Daily Shift Cutoff</h3>
-              <p className="text-xs text-[#6B7280]">
-                Any employee shift left open is automatically checked out and tracking stops unconditionally.
-              </p>
-            </div>
+      <form onSubmit={handleSave} className="space-y-4">
+        {/* Policy Section 1: Auto Cutoff */}
+        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+            <Clock className="w-4 h-4 text-[#16A34A]" />
+            <h3 className="font-bold text-xs text-white">Daily Auto Check-Out Rule</h3>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <div>
-              <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">
-                Auto-Checkout Time (IST)
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                Auto-Checkout Cutoff Time
               </label>
               <input
                 type="time"
                 value={settings.auto_checkout_time}
                 onChange={(e) => setSettings({ ...settings, auto_checkout_time: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white font-mono text-xs focus:border-[#16A34A] focus:outline-none"
               />
+              <p className="text-[10px] text-[#6B7280] mt-1">Default: 11:40 PM IST nightly cutoff</p>
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">Timezone</label>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">Timezone Standard</label>
               <input
                 type="text"
                 disabled
-                value="(GMT+5:30) Asia/Kolkata (Indian Standard Time)"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/50 border border-slate-800 text-slate-400 text-xs"
+                value="(GMT+5:30) Asia/Kolkata (IST)"
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+              />
+              <p className="text-[10px] text-[#6B7280] mt-1">System clock reference</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Policy Section 2: Breaks */}
+        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+            <Coffee className="w-4 h-4 text-amber-400" />
+            <h3 className="font-bold text-xs text-white">Lunch & Break Duration Cap</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                Max Allowed Break
+              </label>
+              <select
+                value={settings.max_break_minutes}
+                onChange={(e) => setSettings({ ...settings, max_break_minutes: parseInt(e.target.value) })}
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white text-xs focus:border-[#16A34A] focus:outline-none"
+              >
+                <option value={15}>15 Minutes</option>
+                <option value={30}>30 Minutes (Recommended)</option>
+                <option value={45}>45 Minutes</option>
+                <option value={60}>60 Minutes</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">Break Tracking Mode</label>
+              <input
+                type="text"
+                disabled
+                value="Auto GPS Paused During Break"
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs"
               />
             </div>
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
-              <Coffee className="w-5 h-5" />
+        {/* Policy Section 3: Data Retention */}
+        <div className="p-4 rounded-lg border border-slate-800 bg-[#0B1120] space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+            <Database className="w-4 h-4 text-blue-400" />
+            <h3 className="font-bold text-xs text-white">Data Retention Policy</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                Route Breadcrumbs History
+              </label>
+              <input
+                type="text"
+                disabled
+                value="15 Days Rolling Retention"
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+              />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-white">Lunch & Personal Break Auto-Resume Cap</h3>
-              <p className="text-xs text-[#6B7280]">
-                Tracking is paused during lunch break. If employee forgets to resume, tracking automatically resumes after this limit.
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-[#6B7280] mb-1">
-              Max Break Duration (Minutes)
-            </label>
-            <select
-              value={settings.max_break_minutes}
-              onChange={(e) => setSettings({ ...settings, max_break_minutes: Number(e.target.value) })}
-              className="w-full sm:w-1/2 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-[#16A34A] focus:outline-none"
-            >
-              <option value="30">30 Minutes (Standard)</option>
-              <option value="45">45 Minutes</option>
-              <option value="60">60 Minutes</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#16A34A]/15 text-[#86EFAC] flex items-center justify-center">
-              <Database className="w-5 h-5 text-[#16A34A]" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm text-white">Data Retention & Storage Limits (Free Tier)</h3>
-              <p className="text-xs text-[#6B7280]">
-                Automated 02:00 AM daily pruning job deletes expired records past these thresholds.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-              <span className="text-[#6B7280] font-semibold">Route History Retention:</span>
-              <p className="text-lg font-bold text-white mt-1">15 Calendar Days</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-              <span className="text-[#6B7280] font-semibold">Attendance Timesheet Retention:</span>
-              <p className="text-lg font-bold text-white mt-1">45 Calendar Days</p>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                Attendance Timesheets & Invoices
+              </label>
+              <input
+                type="text"
+                disabled
+                value="45 Days Full Audit Trail"
+                className="w-full px-3 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs font-mono"
+              />
             </div>
           </div>
         </div>
 
-        <button
-          type="submit"
-          className="px-6 py-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold text-xs flex items-center gap-2 transition shadow-lg shadow-green-600/25"
-        >
-          <Save className="w-4 h-4 text-white" /> Save Organization Settings
-        </button>
+        {/* Action Button */}
+        <div className="pt-2 flex justify-end">
+          <button
+            type="submit"
+            className="px-4 py-2 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-semibold text-xs flex items-center gap-1.5 transition"
+          >
+            <Save className="w-3.5 h-3.5" /> Save Policy Changes
+          </button>
+        </div>
       </form>
     </div>
   );
