@@ -67,4 +67,52 @@ export class EmployeeApi {
     });
     return response.json();
   }
+
+  // Manager-specific API methods
+  static async getManagerTeam(session: any) {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/live-team`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load team members');
+    return result;
+  }
+
+  static async addEmployee(session: any, data: { full_name: string; phone: string; password: string; designation?: string }) {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/employees`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({
+        full_name: data.full_name,
+        phone: data.phone,
+        password: data.password,
+        designation: data.designation || 'Field Staff',
+        role: 'EMPLOYEE',
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Failed to add employee');
+    return result;
+  }
+
+  static async resetDeviceBinding(session: any, employeeId: string) {
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/employees`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({ action: 'RESET_DEVICE', id: employeeId }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Failed to reset device binding');
+    return result;
+  }
 }

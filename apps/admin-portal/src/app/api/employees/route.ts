@@ -4,6 +4,8 @@ import { prisma } from '@perzent/database';
 import { ProvisionEmployeeSchema } from '@perzent/shared-types';
 import { authErrorResponse, requireSession } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 const employeeView = (user: any) => ({
   id: user.id,
   company_id: user.company_id,
@@ -49,8 +51,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession(request, ['OWNER']);
-    const parsed = ProvisionEmployeeSchema.safeParse(await request.json());
+    const session = await requireSession(request, ['OWNER', 'MANAGER']);
+    const body = await request.json();
+    const parsed = ProvisionEmployeeSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
@@ -62,18 +65,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'An employee with this phone number already exists.' }, { status: 409 });
     }
 
+    const assignedManagerId = session.role === 'MANAGER'
+      ? session.userId
+      : parsed.data.manager_id || null;
+
+    const assignedRole = session.role === 'MANAGER'
+      ? 'EMPLOYEE'
+      : parsed.data.role || 'EMPLOYEE';
+
     const [department, manager] = await Promise.all([
       parsed.data.department_id
         ? prisma.department.findFirst({ where: { id: parsed.data.department_id, company_id: session.companyId } })
         : prisma.department.findFirst({ where: { company_id: session.companyId }, orderBy: { created_at: 'asc' } }),
-      parsed.data.manager_id
-        ? prisma.user.findFirst({ where: { id: parsed.data.manager_id, company_id: session.companyId, role: { in: ['OWNER', 'MANAGER'] } } })
+      assignedManagerId
+        ? prisma.user.findFirst({ where: { id: assignedManagerId, company_id: session.companyId, role: { in: ['OWNER', 'MANAGER'] } } })
         : Promise.resolve(null),
     ]);
     if (parsed.data.department_id && !department) {
       return NextResponse.json({ error: 'Department does not belong to this company' }, { status: 400 });
     }
-    if (parsed.data.manager_id && !manager) {
+    if (assignedManagerId && !manager) {
       return NextResponse.json({ error: 'Manager does not belong to this company' }, { status: 400 });
     }
 
@@ -84,8 +95,8 @@ export async function POST(request: Request) {
         phone: parsed.data.phone,
         email: parsed.data.email?.toLowerCase() || null,
         password_hash: await hash(parsed.data.password, 12),
-        designation: parsed.data.designation,
-        role: parsed.data.role,
+        designation: parsed.data.designation || 'Field Staff',
+        role: assignedRole,
         department_id: department?.id,
         manager_id: manager?.id,
       },

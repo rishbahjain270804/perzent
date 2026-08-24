@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   AppState,
+  Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -12,6 +15,7 @@ import { DeviceIntegrityService, WorkReadiness } from '../services/DeviceIntegri
 import { EmployeeApi } from '../services/EmployeeApi';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
+type ManagerTab = 'DUTY' | 'TEAM';
 
 export default function DutyDashboardScreen({
   session,
@@ -22,6 +26,10 @@ export default function DutyDashboardScreen({
   deviceInfo?: any;
   onLogout: () => void;
 }) {
+  const isManager = session.role === 'MANAGER';
+  const [activeTab, setActiveTab] = useState<ManagerTab>('DUTY');
+
+  // Duty / Shift States
   const [shiftStatus, setShiftStatus] = useState<ShiftStatus>('CHECKED_OUT');
   const [alreadyCompletedToday, setAlreadyCompletedToday] = useState(false);
   const [punchInTimestamp, setPunchInTimestamp] = useState<number | null>(null);
@@ -32,6 +40,16 @@ export default function DutyDashboardScreen({
   const [breakTimerSec, setBreakTimerSec] = useState(1800);
   const [readiness, setReadiness] = useState<WorkReadiness | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Manager Team Tracking States
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [addEmployeeModalVisible, setAddEmployeeModalVisible] = useState(false);
+  const [newEmpName, setNewEmpName] = useState('');
+  const [newEmpPhone, setNewEmpPhone] = useState('');
+  const [newEmpPassword, setNewEmpPassword] = useState('');
+  const [newEmpDesignation, setNewEmpDesignation] = useState('');
+  const [addingEmployee, setAddingEmployee] = useState(false);
 
   const refreshReadiness = useCallback(async (sendToOwner = false) => {
     try {
@@ -88,12 +106,32 @@ export default function DutyDashboardScreen({
       .catch((error) => Alert.alert('Sync failed', error.message));
   }, [session]);
 
+  const loadManagerTeam = useCallback(async () => {
+    if (!isManager) return;
+    setTeamLoading(true);
+    try {
+      const team = await EmployeeApi.getManagerTeam(session);
+      if (Array.isArray(team)) {
+        setTeamMembers(team);
+      }
+    } catch (err: any) {
+      // Silent or toast
+    } finally {
+      setTeamLoading(false);
+    }
+  }, [isManager, session]);
+
   useEffect(() => {
     syncAttendanceState();
     refreshReadiness(true);
-    const complianceTimer = setInterval(() => refreshReadiness(true), 60_000);
+    if (isManager) loadManagerTeam();
+
+    const complianceTimer = setInterval(() => {
+      refreshReadiness(true);
+      if (isManager) loadManagerTeam();
+    }, 30_000);
     return () => clearInterval(complianceTimer);
-  }, [syncAttendanceState, refreshReadiness]);
+  }, [syncAttendanceState, refreshReadiness, isManager, loadManagerTeam]);
 
   // AppState listener: immediately re-sync server attendance & re-compute clocks when app becomes active
   useEffect(() => {
@@ -102,10 +140,11 @@ export default function DutyDashboardScreen({
         syncAttendanceState();
         updateClocks();
         refreshReadiness(true);
+        if (isManager) loadManagerTeam();
       }
     });
     return () => subscription.remove();
-  }, [syncAttendanceState, updateClocks, refreshReadiness]);
+  }, [syncAttendanceState, updateClocks, refreshReadiness, isManager, loadManagerTeam]);
 
   // Real-time ticking clock based on absolute time differences
   useEffect(() => {
@@ -124,7 +163,7 @@ export default function DutyDashboardScreen({
         await EmployeeApi.sendWaypoint(session, pos);
         setLastWaypointTime(Date.now());
       } catch {
-        // Silent failure for transient background blips
+        // Silent failure for background blips
       }
     };
     pingLocation();
@@ -247,6 +286,56 @@ export default function DutyDashboardScreen({
     }
   };
 
+  const handleCreateEmployee = async () => {
+    if (!newEmpName.trim() || !newEmpPhone.trim() || !newEmpPassword.trim()) {
+      Alert.alert('Validation Error', 'Full name, 10-digit mobile number, and password are required.');
+      return;
+    }
+    setAddingEmployee(true);
+    try {
+      await EmployeeApi.addEmployee(session, {
+        full_name: newEmpName.trim(),
+        phone: newEmpPhone.trim(),
+        password: newEmpPassword.trim(),
+        designation: newEmpDesignation.trim() || 'Field Staff',
+      });
+      Alert.alert('Success', `Employee ${newEmpName} has been added successfully.`);
+      setAddEmployeeModalVisible(false);
+      setNewEmpName('');
+      setNewEmpPhone('');
+      setNewEmpPassword('');
+      setNewEmpDesignation('');
+      loadManagerTeam();
+    } catch (err: any) {
+      Alert.alert('Could not add employee', err.message);
+    } finally {
+      setAddingEmployee(false);
+    }
+  };
+
+  const handleResetDevice = (memberId: string, memberName: string) => {
+    Alert.alert(
+      'Reset Device Binding?',
+      `Are you sure you want to reset device binding for ${memberName}? They will be able to log in on a new device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Device',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await EmployeeApi.resetDeviceBinding(session, memberId);
+              Alert.alert('Device Reset', `Device binding for ${memberName} was reset.`);
+              loadManagerTeam();
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatDuration = (totalSeconds: number) => {
     const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
     const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
@@ -262,128 +351,327 @@ export default function DutyDashboardScreen({
         ? 'Shift completed'
         : 'Not checked in';
 
+  const onDutyCount = teamMembers.filter((m) => m.shift_status === 'CHECKED_IN').length;
+  const stalledCount = teamMembers.filter((m) => m.is_gps_disconnected).length;
+
   return (
-    <ScrollView contentContainerStyle={styles.page}>
+    <ScrollView
+      contentContainerStyle={styles.page}
+      refreshControl={
+        isManager ? (
+          <RefreshControl refreshing={teamLoading} onRefresh={loadManagerTeam} colors={['#16A34A']} />
+        ) : undefined
+      }
+    >
       <View style={styles.header}>
         <View style={styles.brandMark}><Text style={styles.brandLetter}>P</Text></View>
         <View style={styles.identity}>
           <Text style={styles.greeting}>Hello,</Text>
           <Text style={styles.name}>{session.full_name}</Text>
-          <Text style={styles.role}>{session.designation || 'Employee'}</Text>
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
+          </View>
         </View>
         <TouchableOpacity onPress={onLogout} style={styles.logoutButton}>
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </View>
 
-      {/* 2-Minute GPS / Mobile Internet Stalled Warning */}
-      {isGpsStalled && (
-        <View style={styles.gpsWarningCard}>
-          <Text style={styles.gpsWarningTitle}>⚠️ GPS / Location Disconnected (&gt;2 min)</Text>
-          <Text style={styles.gpsWarningText}>
-            No location update received for over 2 minutes. Ensure Location (GPS) and Mobile Internet remain ON while on duty.
-          </Text>
+      {/* Manager Tab Switcher */}
+      {isManager && (
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'DUTY' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('DUTY')}
+          >
+            <Text style={[styles.tabText, activeTab === 'DUTY' && styles.tabTextActive]}>My Shift Duty</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'TEAM' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('TEAM')}
+          >
+            <Text style={[styles.tabText, activeTab === 'TEAM' && styles.tabTextActive]}>
+              My Team ({teamMembers.length})
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      <View style={styles.statusCard}>
-        <View style={styles.statusRow}>
-          <View
-            style={[
-              styles.statusDot,
-              shiftStatus === 'CHECKED_IN' && styles.statusDotActive,
-              alreadyCompletedToday && styles.statusDotCompleted,
-            ]}
-          />
-          <Text style={styles.statusLabel}>{statusLabel}</Text>
-        </View>
-        <Text style={styles.timer}>
-          {shiftStatus === 'ON_BREAK'
-            ? formatDuration(breakTimerSec)
-            : shiftStatus === 'CHECKED_IN'
-              ? formatDuration(elapsedSec)
-              : '00:00:00'}
-        </Text>
-        <Text style={styles.timerCaption}>
-          {shiftStatus === 'ON_BREAK' ? 'Break time remaining' : 'Shift duration (Server Synced)'}
-        </Text>
-      </View>
+      {/* --- TAB 1: MY DUTY & SHIFT --- */}
+      {(!isManager || activeTab === 'DUTY') && (
+        <View>
+          {/* 2-Minute GPS / Mobile Internet Stalled Warning */}
+          {isGpsStalled && (
+            <View style={styles.gpsWarningCard}>
+              <Text style={styles.gpsWarningTitle}>⚠️ GPS / Location Disconnected (&gt;2 min)</Text>
+              <Text style={styles.gpsWarningText}>
+                No location update received for over 2 minutes. Ensure Location (GPS) and Mobile Internet remain ON while on duty.
+              </Text>
+            </View>
+          )}
 
-      <View style={[styles.readinessCard, readiness?.ready ? styles.readyCard : styles.blockedCard]}>
-        <View style={styles.readinessHeading}>
-          <Text style={styles.readinessIcon}>{readiness?.ready ? '✓' : '!'}</Text>
-          <View style={styles.readinessCopy}>
-            <Text style={styles.readinessTitle}>
-              {readiness?.ready ? 'Ready for work' : readiness ? 'Action required' : 'Checking requirements…'}
+          <View style={styles.statusCard}>
+            <View style={styles.statusRow}>
+              <View
+                style={[
+                  styles.statusDot,
+                  shiftStatus === 'CHECKED_IN' && styles.statusDotActive,
+                  alreadyCompletedToday && styles.statusDotCompleted,
+                ]}
+              />
+              <Text style={styles.statusLabel}>{statusLabel}</Text>
+            </View>
+            <Text style={styles.timer}>
+              {shiftStatus === 'ON_BREAK'
+                ? formatDuration(breakTimerSec)
+                : shiftStatus === 'CHECKED_IN'
+                  ? formatDuration(elapsedSec)
+                  : '00:00:00'}
             </Text>
-            <Text style={styles.readinessSubtitle}>
-              {readiness?.ready
-                ? 'Location and device requirements are active.'
-                : 'Complete these items before checking in or resuming.'}
+            <Text style={styles.timerCaption}>
+              {shiftStatus === 'ON_BREAK' ? 'Break time remaining' : 'Shift duration (Server Synced)'}
+            </Text>
+          </View>
+
+          <View style={[styles.readinessCard, readiness?.ready ? styles.readyCard : styles.blockedCard]}>
+            <View style={styles.readinessHeading}>
+              <Text style={styles.readinessIcon}>{readiness?.ready ? '✓' : '!'}</Text>
+              <View style={styles.readinessCopy}>
+                <Text style={styles.readinessTitle}>
+                  {readiness?.ready ? 'Ready for work' : readiness ? 'Action required' : 'Checking requirements…'}
+                </Text>
+                <Text style={styles.readinessSubtitle}>
+                  {readiness?.ready
+                    ? 'Location and device requirements are active.'
+                    : 'Complete these items before checking in or resuming.'}
+                </Text>
+              </View>
+            </View>
+            {readiness?.blockers.map((blocker) => (
+              <Text key={blocker.code} style={styles.blockerText}>• {blocker.message}</Text>
+            ))}
+            {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
+              <TouchableOpacity style={styles.settingsButton} onPress={() => DeviceIntegrityService.requestAlwaysPermission()}>
+                <Text style={styles.settingsButtonText}>Enable "Allow all the time"</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* When Already Completed Today: Show Completed Card */}
+          {shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && (
+            <View style={styles.completedCard}>
+              <Text style={styles.completedIcon}>✅</Text>
+              <Text style={styles.completedTitle}>Shift Completed for Today</Text>
+              <Text style={styles.completedSubtitle}>
+                You have already completed your shift for today. Next check-in will open tomorrow (IST).
+              </Text>
+            </View>
+          )}
+
+          {/* When NOT Checked In and NOT completed: Show Check In Button */}
+          {shiftStatus === 'CHECKED_OUT' && !alreadyCompletedToday && (
+            <TouchableOpacity
+              style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
+              onPress={handleCheckIn}
+              disabled={actionLoading}
+            >
+              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Check in'}</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* When Checked In: Show Break & Check Out buttons (NO Check In button) */}
+          {shiftStatus === 'CHECKED_IN' && (
+            <View style={styles.actionStack}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={handleStartBreak} disabled={actionLoading}>
+                <Text style={styles.secondaryButtonText}>Start break</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckOut} disabled={actionLoading}>
+                <Text style={styles.checkoutButtonText}>Check out</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* When On Break: Show Resume Button */}
+          {shiftStatus === 'ON_BREAK' && (
+            <TouchableOpacity
+              style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
+              onPress={handleResume}
+              disabled={actionLoading}
+            >
+              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Resume shift'}</Text>
+            </TouchableOpacity>
+          )}
+
+          <View style={styles.privacyNote}>
+            <Text style={styles.privacyTitle}>Privacy during work</Text>
+            <Text style={styles.privacyText}>
+              Location is used for attendance and active-shift tracking. Device compliance details are shared only with authorized management.
             </Text>
           </View>
         </View>
-        {readiness?.blockers.map((blocker) => (
-          <Text key={blocker.code} style={styles.blockerText}>• {blocker.message}</Text>
-        ))}
-        {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
-          <TouchableOpacity style={styles.settingsButton} onPress={() => DeviceIntegrityService.requestAlwaysPermission()}>
-            <Text style={styles.settingsButtonText}>Enable "Allow all the time"</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      )}
 
-      {/* When Already Completed Today: Show Completed Card */}
-      {shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && (
-        <View style={styles.completedCard}>
-          <Text style={styles.completedIcon}>✅</Text>
-          <Text style={styles.completedTitle}>Shift Completed for Today</Text>
-          <Text style={styles.completedSubtitle}>
-            You have already completed your shift for today. Next check-in will open tomorrow (IST).
-          </Text>
+      {/* --- TAB 2: MANAGER TEAM TRACKING & ADD EMPLOYEE --- */}
+      {isManager && activeTab === 'TEAM' && (
+        <View style={styles.teamContainer}>
+          {/* Header Action: Add Employee */}
+          <TouchableOpacity
+            style={styles.addEmployeeTopButton}
+            onPress={() => setAddEmployeeModalVisible(true)}
+          >
+            <Text style={styles.addEmployeeTopButtonText}>+ Add New Team Employee</Text>
+          </TouchableOpacity>
+
+          {/* Team Quick Stats */}
+          <View style={styles.statsRow}>
+            <View style={styles.statBox}>
+              <Text style={styles.statNumber}>{teamMembers.length}</Text>
+              <Text style={styles.statLabel}>Total Staff</Text>
+            </View>
+            <View style={[styles.statBox, styles.statBoxGreen]}>
+              <Text style={[styles.statNumber, { color: '#16A34A' }]}>{onDutyCount}</Text>
+              <Text style={styles.statLabel}>On Duty Now</Text>
+            </View>
+            <View style={[styles.statBox, stalledCount > 0 && styles.statBoxAmber]}>
+              <Text style={[styles.statNumber, { color: stalledCount > 0 ? '#D97706' : '#64748B' }]}>{stalledCount}</Text>
+              <Text style={styles.statLabel}>GPS Disconnected</Text>
+            </View>
+          </View>
+
+          {/* Employee Cards List */}
+          <Text style={styles.sectionHeader}>Field Team ({teamMembers.length})</Text>
+          {teamMembers.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyCardText}>No employees assigned to you yet.</Text>
+              <Text style={styles.emptyCardSubtext}>Tap "+ Add New Team Employee" above to add your first staff member.</Text>
+            </View>
+          ) : (
+            teamMembers.map((member) => {
+              const isOnDuty = member.shift_status === 'CHECKED_IN';
+              const isOnBreak = member.shift_status === 'ON_BREAK';
+              const isDisconnected = member.is_gps_disconnected;
+
+              return (
+                <View key={member.user_id} style={styles.memberCard}>
+                  <View style={styles.memberHeader}>
+                    <View style={styles.memberInfo}>
+                      <Text style={styles.memberName}>{member.full_name}</Text>
+                      <Text style={styles.memberDesignation}>{member.designation || 'Staff'} • {member.department_name || 'Field'}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        isOnDuty && !isDisconnected && styles.badgeDuty,
+                        isOnBreak && styles.badgeBreak,
+                        !isOnDuty && !isOnBreak && styles.badgeOff,
+                        isDisconnected && styles.badgeAlert,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          isOnDuty && !isDisconnected && styles.textDuty,
+                          isOnBreak && styles.textBreak,
+                          !isOnDuty && !isOnBreak && styles.textOff,
+                          isDisconnected && styles.textAlert,
+                        ]}
+                      >
+                        {isDisconnected ? 'GPS Disconnected' : isOnDuty ? 'On Duty' : isOnBreak ? 'On Break' : 'Off Duty'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Location & Ping Details */}
+                  <View style={styles.memberDetails}>
+                    <Text style={styles.memberDetailRow}>
+                      📍 <Text style={styles.detailLabel}>Location:</Text> {member.current_location?.address_name || 'No GPS ping received'}
+                    </Text>
+                    {member.battery_level != null && (
+                      <Text style={styles.memberDetailRow}>
+                        🔋 <Text style={styles.detailLabel}>Battery:</Text> {member.battery_level}%
+                      </Text>
+                    )}
+                    <Text style={styles.memberDetailRow}>
+                      📱 <Text style={styles.detailLabel}>Device:</Text> {member.device_model || 'Not bound yet'}
+                    </Text>
+                  </View>
+
+                  {/* Reset Device Binding Button */}
+                  <TouchableOpacity
+                    style={styles.resetBindingButton}
+                    onPress={() => handleResetDevice(member.user_id, member.full_name)}
+                  >
+                    <Text style={styles.resetBindingText}>Reset Phone Binding</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })
+          )}
         </View>
       )}
 
-      {/* When NOT Checked In and NOT completed: Show Check In Button */}
-      {shiftStatus === 'CHECKED_OUT' && !alreadyCompletedToday && (
-        <TouchableOpacity
-          style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
-          onPress={handleCheckIn}
-          disabled={actionLoading}
-        >
-          <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Check in'}</Text>
-        </TouchableOpacity>
-      )}
+      {/* Modal: Add Employee */}
+      <Modal
+        visible={addEmployeeModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setAddEmployeeModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Add Team Employee</Text>
+            <Text style={styles.modalSubtitle}>Create an employee under your supervision</Text>
 
-      {/* When Checked In: Show Break & Check Out buttons (NO Check In button) */}
-      {shiftStatus === 'CHECKED_IN' && (
-        <View style={styles.actionStack}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleStartBreak} disabled={actionLoading}>
-            <Text style={styles.secondaryButtonText}>Start break</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckOut} disabled={actionLoading}>
-            <Text style={styles.checkoutButtonText}>Check out</Text>
-          </TouchableOpacity>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Full Name (e.g. John Doe)"
+              placeholderTextColor="#94A3B8"
+              value={newEmpName}
+              onChangeText={setNewEmpName}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="10-digit Phone Number"
+              placeholderTextColor="#94A3B8"
+              keyboardType="phone-pad"
+              value={newEmpPhone}
+              onChangeText={setNewEmpPhone}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="App Login Password"
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              value={newEmpPassword}
+              onChangeText={setNewEmpPassword}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Designation (e.g. Field Executive)"
+              placeholderTextColor="#94A3B8"
+              value={newEmpDesignation}
+              onChangeText={setNewEmpDesignation}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setAddEmployeeModalVisible(false)}
+                disabled={addingEmployee}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmitButton, addingEmployee && styles.buttonDisabled]}
+                onPress={handleCreateEmployee}
+                disabled={addingEmployee}
+              >
+                <Text style={styles.modalSubmitText}>{addingEmployee ? 'Creating…' : 'Create Employee'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      )}
-
-      {/* When On Break: Show Resume Button */}
-      {shiftStatus === 'ON_BREAK' && (
-        <TouchableOpacity
-          style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
-          onPress={handleResume}
-          disabled={actionLoading}
-        >
-          <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Resume shift'}</Text>
-        </TouchableOpacity>
-      )}
-
-      <View style={styles.privacyNote}>
-        <Text style={styles.privacyTitle}>Privacy during work</Text>
-        <Text style={styles.privacyText}>
-          Location is used for attendance and active-shift tracking. Device compliance details are shared only with authorized management.
-        </Text>
-      </View>
+      </Modal>
 
       {/* Persistent Mandatory 'Allow all the time' Permission Modal */}
       {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
@@ -414,8 +702,8 @@ export default function DutyDashboardScreen({
 }
 
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, backgroundColor: '#F8FAFC', padding: 20, paddingBottom: 36 },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
+  page: { flexGrow: 1, backgroundColor: '#F8FAFC', padding: 20, paddingBottom: 40 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
   brandMark: {
     width: 46,
     height: 46,
@@ -428,9 +716,40 @@ const styles = StyleSheet.create({
   identity: { flex: 1, marginLeft: 12 },
   greeting: { color: '#64748B', fontSize: 12 },
   name: { color: '#0F172A', fontSize: 18, fontWeight: '800' },
-  role: { color: '#64748B', fontSize: 12, marginTop: 1 },
+  roleBadge: { backgroundColor: '#E2E8F0', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 2 },
+  roleBadgeText: { color: '#334155', fontSize: 11, fontWeight: '700' },
   logoutButton: { paddingVertical: 9, paddingHorizontal: 12 },
   logoutText: { color: '#475569', fontWeight: '700' },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  tabButtonActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  tabTextActive: {
+    color: '#0F172A',
+    fontWeight: '800',
+  },
   gpsWarningCard: {
     backgroundColor: '#FFFBEB',
     borderColor: '#FDE68A',
@@ -524,6 +843,159 @@ const styles = StyleSheet.create({
   privacyNote: { marginTop: 24, paddingHorizontal: 4 },
   privacyTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   privacyText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
+
+  // Team styles
+  teamContainer: { marginTop: 4 },
+  addEmployeeTopButton: {
+    backgroundColor: '#16A34A',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  addEmployeeTopButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    alignItems: 'center',
+  },
+  statBoxGreen: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  statBoxAmber: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  sectionHeader: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  emptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  emptyCardText: { fontSize: 14, fontWeight: '700', color: '#334155', marginBottom: 4 },
+  emptyCardSubtext: { fontSize: 12, color: '#64748B', textAlign: 'center' },
+  memberCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    marginBottom: 12,
+  },
+  memberHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  memberInfo: { flex: 1, marginRight: 8 },
+  memberName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  memberDesignation: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  statusBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  badgeDuty: { backgroundColor: '#DCFCE7' },
+  textDuty: { color: '#166534', fontSize: 11, fontWeight: '800' },
+  badgeBreak: { backgroundColor: '#FEF3C7' },
+  textBreak: { color: '#92400E', fontSize: 11, fontWeight: '800' },
+  badgeOff: { backgroundColor: '#F1F5F9' },
+  textOff: { color: '#475569', fontSize: 11, fontWeight: '800' },
+  badgeAlert: { backgroundColor: '#FEE2E2' },
+  textAlert: { color: '#991B1B', fontSize: 11, fontWeight: '800' },
+  memberDetails: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+    marginBottom: 10,
+  },
+  memberDetailRow: { fontSize: 12, color: '#334155', lineHeight: 17 },
+  detailLabel: { fontWeight: '700' },
+  resetBindingButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+  },
+  resetBindingText: { fontSize: 11, fontWeight: '700', color: '#475569' },
+
+  // Modal styles
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 22,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  modalSubtitle: { fontSize: 12, color: '#64748B', marginBottom: 16 },
+  modalInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+  },
+  modalCancelText: { color: '#475569', fontSize: 14, fontWeight: '700' },
+  modalSubmitButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+  },
+  modalSubmitText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+
+  // Permission Modal
   permissionModalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.88)',

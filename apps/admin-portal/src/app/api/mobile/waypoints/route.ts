@@ -11,7 +11,7 @@ const todayIst = () => {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession(request, ['EMPLOYEE']);
+    const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const body = await request.json();
     const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const session = await requireSession(request, ['EMPLOYEE']);
+    const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const workDate = todayIst();
     const waypoints = await prisma.locationWaypoint.findMany({
       where: {

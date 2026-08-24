@@ -22,7 +22,7 @@ const complianceError = (integrity: any) => {
 
 export async function GET(request: Request) {
   try {
-    const session = await requireSession(request, ['EMPLOYEE']);
+    const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
       where: { user_id_work_date: { user_id: session.userId, work_date: workDate } },
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession(request, ['EMPLOYEE']);
+    const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const body = await request.json();
     const workDate = todayIst();
     const attendance = await prisma.attendanceRecord.findUnique({
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await requireSession(request, ['EMPLOYEE']);
+    const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
     const body = await request.json();
     const telemetry = body.telemetry && typeof body.telemetry === 'object' ? body.telemetry : body;
     const device = body.device && typeof body.device === 'object' ? body.device : null;

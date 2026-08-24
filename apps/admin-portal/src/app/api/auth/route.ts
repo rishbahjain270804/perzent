@@ -11,6 +11,8 @@ import {
   setSessionCookie,
 } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 const userPayload = (user: any) => ({
   user_id: user.id,
   company_id: user.company_id,
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
             phone: parsed.data.phone,
             password_hash: passwordHash,
             role: 'OWNER',
-            designation: 'Business Owner & Superadmin',
+            designation: 'Company Owner',
           },
           include: { company: { select: { name: true } } },
         });
@@ -101,15 +103,18 @@ export async function POST(request: Request) {
     }
 
     if (parsed.data.device_uuid) {
-      if (user.role !== 'EMPLOYEE') {
-        return NextResponse.json({ error: 'Only employee accounts can use the field app' }, { status: 403 });
+      // Mobile app login: only EMPLOYEE and MANAGER accounts can use the mobile app
+      if (user.role !== 'EMPLOYEE' && user.role !== 'MANAGER') {
+        return NextResponse.json({
+          error: 'Only Employee and Manager accounts can log in to the mobile app. Company Owners should log in via the web portal.',
+        }, { status: 403 });
       }
       const existingDevice = await prisma.userDevice.findFirst({
         where: { user_id: user.id, is_active: true },
       });
       if (existingDevice && existingDevice.device_uuid !== parsed.data.device_uuid) {
         return NextResponse.json(
-          { error: 'Device mismatch. Account is bound to another phone. Contact your manager to reset.' },
+          { error: 'Device mismatch. Account is bound to another phone. Contact your manager or company owner to reset.' },
           { status: 403 }
         );
       }
@@ -128,8 +133,13 @@ export async function POST(request: Request) {
           os_version: parsed.data.os_version || 'Unknown',
         },
       });
-    } else if (user.role === 'EMPLOYEE') {
-      return NextResponse.json({ error: 'Employees must sign in from the registered field app' }, { status: 403 });
+    } else {
+      // Web portal login: ONLY Company Owner can log in via website
+      if (user.role !== 'OWNER') {
+        return NextResponse.json({
+          error: 'Only Company Owners can log in to the web portal. Managers and Employees must log in using the Perzent Mobile App.',
+        }, { status: 403 });
+      }
     }
 
     const session = await createSession(user.id);
