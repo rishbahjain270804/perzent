@@ -309,6 +309,31 @@ export default function DutyDashboardScreen({
           Location is used for attendance and active-shift tracking. Device compliance details are shared only with authorized management.
         </Text>
       </View>
+
+      {/* Persistent Mandatory 'Allow all the time' Permission Modal */}
+      {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
+        <View style={styles.permissionModalBackdrop}>
+          <View style={styles.permissionModalCard}>
+            <View style={styles.permIconCircle}>
+              <Text style={styles.permIcon}>📍</Text>
+            </View>
+            <Text style={styles.permTitle}>"Allow all the time" Required</Text>
+            <Text style={styles.permDescription}>
+              To accurately record your on-duty shift and GPS route, Perzent requires background location permission.
+            </Text>
+            <View style={styles.permStepBox}>
+              <Text style={styles.permStepText}>1. Tap the button below to open Permission settings.</Text>
+              <Text style={styles.permStepText}>2. Select <Text style={{ fontWeight: '800', color: '#166534' }}>"Allow all the time"</Text>.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.permActionButton}
+              onPress={() => DeviceIntegrityService.requestAlwaysPermission()}
+            >
+              <Text style={styles.permActionText}>Grant "Allow all the time"</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -392,4 +417,72 @@ const styles = StyleSheet.create({
   privacyNote: { marginTop: 24, paddingHorizontal: 4 },
   privacyTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   privacyText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
+  permissionModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 9999,
+  },
+  permissionModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+  },
+  permIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  permIcon: { fontSize: 32 },
+  permTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  permDescription: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  permStepBox: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+    marginBottom: 20,
+  },
+  permStepText: {
+    fontSize: 12,
+    color: '#334155',
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  permActionButton: {
+    backgroundColor: '#16A34A',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    width: '100%',
+    alignItems: 'center',
+  },
+  permActionText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
 });
