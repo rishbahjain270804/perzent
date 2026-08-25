@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  let latestVersion = '1.1.3';
-  let latestVersionCode = 6;
+  let latestVersion = '1.1.4';
+  let latestVersionCode = 7;
 
   try {
     const candidatePaths = [

@@ -16,6 +16,7 @@ import { EmployeeApi } from '../services/EmployeeApi';
 import { AutoUpdateService } from '../services/AutoUpdateService';
 import { ShiftNotificationService } from '../services/ShiftNotificationService';
 import { WaypointQueueService } from '../services/WaypointQueueService';
+import { BackgroundTrackingService } from '../services/BackgroundTrackingService';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -116,6 +117,11 @@ export default function DutyDashboardScreen({
           const currentServerNow = Date.now() + (data.server_time ? new Date(data.server_time).getTime() - Date.now() : 0);
           const used = Math.floor((currentServerNow - bt) / 1000);
           setBreakTimerSec(Math.max(0, 1800 - used));
+        }
+        if (status === 'CHECKED_IN') {
+          BackgroundTrackingService.start(session.token, session.user_id);
+        } else if (status === 'CHECKED_OUT') {
+          BackgroundTrackingService.stop();
         }
       })
       .catch((error) => Alert.alert('Sync failed', error.message));
@@ -225,6 +231,7 @@ export default function DutyDashboardScreen({
       setElapsedSec(initialSec);
       setShiftStatus(result.status);
       ShiftNotificationService.updateLiveNotification(formatDuration(initialSec), 'CHECKED_IN');
+      BackgroundTrackingService.start(session.token, session.user_id);
       Alert.alert('Shift started', 'Your location and attendance were verified.');
     } catch (error: any) {
       Alert.alert('Check-in failed', error.message);
@@ -246,6 +253,7 @@ export default function DutyDashboardScreen({
             await WaypointQueueService.flushQueue(session).catch(() => undefined);
             await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
             await ShiftNotificationService.dismiss();
+            await BackgroundTrackingService.stop();
             await WaypointQueueService.clear().catch(() => undefined);
             setShiftStatus('CHECKED_OUT');
             setAlreadyCompletedToday(true);
@@ -297,6 +305,7 @@ export default function DutyDashboardScreen({
       setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
       ShiftNotificationService.updateLiveNotification(formatDuration(elapsedSec), 'CHECKED_IN');
+      BackgroundTrackingService.start(session.token, session.user_id);
     } catch (error: any) {
       Alert.alert('Resume failed', error.message);
     } finally {

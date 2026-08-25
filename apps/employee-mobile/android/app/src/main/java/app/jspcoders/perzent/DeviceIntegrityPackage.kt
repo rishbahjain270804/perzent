@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class DeviceIntegrityPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
-    listOf(DeviceIntegrityModule(reactContext))
+    listOf(
+      DeviceIntegrityModule(reactContext),
+      PerzentTrackingModule(reactContext)
+    )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
     emptyList()

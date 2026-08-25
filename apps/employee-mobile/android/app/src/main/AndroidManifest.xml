@@ -35,5 +35,11 @@
         <data android:scheme="app.jspcoders.perzent"/>
       </intent-filter>
     </activity>
+
+    <service
+      android:name=".PerzentLocationService"
+      android:enabled="true"
+      android:exported="false"
+      android:foregroundServiceType="location" />
   </application>
 </manifest>

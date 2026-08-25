@@ -15,6 +15,7 @@ import DutyDashboardScreen from './src/screens/DutyDashboardScreen';
 import { DeviceBindingService } from './src/services/DeviceBindingService';
 import { EmployeeApi } from './src/services/EmployeeApi';
 import { AutoUpdateService, AppVersionInfo } from './src/services/AutoUpdateService';
+import { BackgroundTrackingService } from './src/services/BackgroundTrackingService';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -70,6 +71,7 @@ export default function App() {
           session={session}
           deviceInfo={deviceInfo}
           onLogout={async () => {
+            await BackgroundTrackingService.stop().catch(() => undefined);
             await EmployeeApi.logout(session).catch(() => undefined);
             await DeviceBindingService.clearSession();
             setSession(null);
