@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   let latestVersion = '1.1.2';
-  let latestVersionCode = 4;
+  let latestVersionCode = 5;
 
   try {
     const candidatePaths = [

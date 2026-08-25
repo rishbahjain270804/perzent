@@ -9,11 +9,11 @@ export const API_CONFIG = {
   BASE_URL:
     process.env.EXPO_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    'https://api.perzent.jspcoders.codes',
+    'https://perzent.vercel.app',
   DOMAINS: {
-    API_BACKEND: 'https://api.perzent.jspcoders.codes',
-    EMPLOYEE_APP: 'https://perzent.jspcoders.app',
-    OWNER_ADMIN: 'https://perzent.jspcoders.codes/owner-admin',
+    API_BACKEND: 'https://perzent.vercel.app',
+    EMPLOYEE_APP: 'https://perzent.vercel.app',
+    OWNER_ADMIN: 'https://perzent.vercel.app/dashboard',
   },
   ENDPOINTS: {
     AUTH_LOGIN: '/api/auth',
