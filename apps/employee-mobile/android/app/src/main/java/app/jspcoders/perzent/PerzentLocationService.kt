@@ -54,13 +54,14 @@ class PerzentLocationService : Service() {
         const val KEY_API_BASE = "api_base_url"
         const val KEY_TRACKING_ACTIVE = "tracking_active"
         const val KEY_OFFLINE_WAYPOINTS = "offline_waypoints_queue_v1"
-        const val MAX_OFFLINE_POINTS = 2000
+        const val MAX_OFFLINE_POINTS = 3000
 
         const val ACTION_START = "app.jspcoders.perzent.ACTION_START_TRACKING"
         const val ACTION_STOP = "app.jspcoders.perzent.ACTION_STOP_TRACKING"
 
-        const val UPDATE_INTERVAL_MS = 15_000L // 15 seconds
-        const val FASTEST_INTERVAL_MS = 10_000L // 10 seconds
+        // High-precision live GPS tracking (3 to 4 seconds) for fluid Swiggy/Zomato/Rapido style live map
+        const val UPDATE_INTERVAL_MS = 4_000L // 4 seconds
+        const val FASTEST_INTERVAL_MS = 2_500L // 2.5 seconds
 
         fun startService(context: Context, token: String, userId: String, apiBase: String = "https://perzent.vercel.app") {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -108,9 +109,9 @@ class PerzentLocationService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private var lastTelemetrySendTime = 0L
@@ -187,7 +188,7 @@ class PerzentLocationService : Service() {
                 "Work Shift & Duty Tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active shift tracking and real-time location sync"
+                description = "Active shift live tracking and real-time navigation sync"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
@@ -197,8 +198,8 @@ class PerzentLocationService : Service() {
     }
 
     private fun buildForegroundNotification(
-        title: String = "Perzent • On Duty Active",
-        content: String = "Continuous shift tracking active • GPS sync on"
+        title: String = "Perzent • Live Duty Active",
+        content: String = "High-accuracy live GPS tracking active • Real-time sync"
     ): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -232,14 +233,14 @@ class PerzentLocationService : Service() {
                 val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 if (!isGpsEnabled) {
                     val warnNotif = buildForegroundNotification(
-                        title = "⚠️ Location (GPS) Disabled",
-                        content = "Turn on Location (GPS) immediately to maintain active duty tracking"
+                        title = "⚠️ Location (GPS) Turned OFF",
+                        content = "Turn on GPS immediately to maintain active live tracking"
                     )
                     notificationManager?.notify(NOTIFICATION_ID, warnNotif)
                 } else {
                     val normalNotif = buildForegroundNotification(
-                        title = "Perzent • On Duty Active",
-                        content = "Continuous shift tracking active • GPS sync on"
+                        title = "Perzent • Live Duty Active",
+                        content = "High-accuracy live GPS tracking active • Real-time sync"
                     )
                     notificationManager?.notify(NOTIFICATION_ID, normalNotif)
 
@@ -262,6 +263,7 @@ class PerzentLocationService : Service() {
 
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
                 .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
+                .setMinUpdateDistanceMeters(1.0f) // trigger update on 1 meter movement for ultra-smooth live path
                 .setWaitForAccurateLocation(false)
                 .build()
 
@@ -277,7 +279,7 @@ class PerzentLocationService : Service() {
                 locationCallback!!,
                 Looper.getMainLooper()
             )
-            Log.i(TAG, "FusedLocationProviderClient updates started (15s interval)")
+            Log.i(TAG, "FusedLocationProviderClient high-speed updates started (4s interval)")
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission missing for FusedLocationProviderClient", e)
         } catch (e: Exception) {
@@ -298,6 +300,7 @@ class PerzentLocationService : Service() {
                 override fun onLocationChanged(location: Location) {
                     handleNewLocation(location, token, userId, apiBase)
                 }
+                @Deprecated("Deprecated in Java")
                 override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
                 override fun onProviderEnabled(provider: String) {}
                 override fun onProviderDisabled(provider: String) {}
@@ -307,7 +310,7 @@ class PerzentLocationService : Service() {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
                     UPDATE_INTERVAL_MS,
-                    0f,
+                    1.0f,
                     systemLocationListener!!,
                     Looper.getMainLooper()
                 )
@@ -316,7 +319,7 @@ class PerzentLocationService : Service() {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
                     UPDATE_INTERVAL_MS,
-                    0f,
+                    1.0f,
                     systemLocationListener!!,
                     Looper.getMainLooper()
                 )
@@ -344,7 +347,7 @@ class PerzentLocationService : Service() {
                 array
             }
             prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, trimmed.toString()).apply()
-            Log.i(TAG, "Stored waypoint locally in offline queue. Total queued: ${trimmed.length()}")
+            Log.i(TAG, "Stored waypoint in offline queue. Total queued: ${trimmed.length()}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save offline waypoint", e)
         }
@@ -357,7 +360,7 @@ class PerzentLocationService : Service() {
             val array = JSONArray(existingStr)
             if (array.length() == 0) return
 
-            Log.i(TAG, "Attempting to flush ${array.length()} offline queued waypoints")
+            Log.i(TAG, "Flushing ${array.length()} offline queued waypoints to server")
             val batchObj = JSONObject().apply {
                 put("waypoints", array)
             }
@@ -374,11 +377,11 @@ class PerzentLocationService : Service() {
             val response = httpClient.newCall(request).execute()
             if (response.isSuccessful) {
                 prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, "[]").apply()
-                Log.i(TAG, "Successfully flushed ${array.length()} offline queued waypoints to server!")
+                Log.i(TAG, "Successfully flushed ${array.length()} offline queued waypoints!")
             }
             response.close()
         } catch (e: Exception) {
-            Log.w(TAG, "Offline flush attempt deferred (network still unavailable): ${e.message}")
+            Log.w(TAG, "Offline flush attempt deferred (network unavailable): ${e.message}")
         }
     }
 
@@ -391,7 +394,7 @@ class PerzentLocationService : Service() {
             location.isFromMockProvider
         }
 
-        Log.d(TAG, "GPS fix: lat=${location.latitude}, lng=${location.longitude}, acc=${location.accuracy}, mock=$isMock")
+        Log.d(TAG, "Live GPS ping: lat=${location.latitude}, lng=${location.longitude}, speed=${location.speed}, heading=${location.bearing}")
 
         Thread {
             val waypointJson = JSONObject().apply {
@@ -404,7 +407,7 @@ class PerzentLocationService : Service() {
             }
 
             try {
-                // First try flushing any previously queued offline waypoints
+                // First attempt to flush any pending offline waypoints
                 flushOfflineWaypoints(token, apiBase)
 
                 val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -419,23 +422,23 @@ class PerzentLocationService : Service() {
 
                 val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
-                    Log.d(TAG, "Waypoint POST response: code=${response.code}")
+                    Log.d(TAG, "Live waypoint posted (200 OK)")
                 } else {
                     saveOfflineWaypoint(waypointJson)
                 }
                 response.close()
             } catch (e: Exception) {
-                Log.w(TAG, "Network down / waypoint POST failed: ${e.message}. Saving to local offline queue.")
+                Log.w(TAG, "Signal dropped / network failed: ${e.message}. Queuing locally.")
                 saveOfflineWaypoint(waypointJson)
             }
 
             val nowMs = System.currentTimeMillis()
-            if (nowMs - lastTelemetrySendTime > 60_000L) {
+            if (nowMs - lastTelemetrySendTime > 45_000L) {
                 lastTelemetrySendTime = nowMs
                 try {
                     sendTelemetry(token, apiBase, isMock)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Telemetry send error: ${e.message}")
+                    Log.w(TAG, "Telemetry error: ${e.message}")
                 }
             }
         }.start()

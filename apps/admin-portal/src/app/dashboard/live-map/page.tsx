@@ -55,7 +55,18 @@ export default function LiveMapPage() {
   const mapRef = useRef<LeafletMap | null>(null);
   const layerRef = useRef<LayerGroup | null>(null);
   const leafletRef = useRef<typeof import('leaflet') | null>(null);
-  const liveMarkerRefs = useRef(new Map<string, Marker>());
+  const liveMarkerRefs = useRef(
+    new Map<
+      string,
+      {
+        marker: Marker;
+        lat: number;
+        lng: number;
+        heading: number;
+        animFrame?: number;
+      }
+    >()
+  );
 
   const [mapReady, setMapReady] = useState(false);
   const [mode, setMode] = useState<MapMode>('LIVE');
@@ -90,9 +101,10 @@ export default function LiveMapPage() {
     }
   }, []);
 
+  // 🚀 Ultra-responsive 3-second live polling for real-time Zomato/Swiggy/Rapido vehicle navigation
   useEffect(() => {
     fetchLiveTeam();
-    const interval = window.setInterval(fetchLiveTeam, 10_000);
+    const interval = window.setInterval(fetchLiveTeam, 3_000);
     return () => window.clearInterval(interval);
   }, [fetchLiveTeam]);
 
@@ -144,30 +156,101 @@ export default function LiveMapPage() {
     return () => { current = false; };
   }, [mode, selectedDate, selectedId]);
 
+  // Smooth position interpolation (Linear Lerp with requestAnimationFrame)
+  const animateMarker = useCallback((
+    state: { marker: Marker; lat: number; lng: number; heading: number; animFrame?: number },
+    targetLat: number,
+    targetLng: number,
+    targetHeading: number,
+    durationMs = 2600
+  ) => {
+    if (state.animFrame) {
+      cancelAnimationFrame(state.animFrame);
+    }
+    const startLat = state.lat;
+    const startLng = state.lng;
+    const startHeading = state.heading;
+    const startTime = performance.now();
+
+    const frame = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      // Ease out cubic
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      const curLat = startLat + (targetLat - startLat) * ease;
+      const curLng = startLng + (targetLng - startLng) * ease;
+      const curHeading = startHeading + (targetHeading - startHeading) * ease;
+
+      state.lat = curLat;
+      state.lng = curLng;
+      state.heading = curHeading;
+      state.marker.setLatLng([curLat, curLng]);
+
+      // Rotate inner vehicle disc icon
+      const iconEl = state.marker.getElement();
+      if (iconEl) {
+        const discEl = iconEl.querySelector<HTMLElement>('.swiggy-vehicle-disc');
+        if (discEl) {
+          discEl.style.transform = `rotate(${Math.round(curHeading)}deg)`;
+        }
+      }
+
+      if (progress < 1) {
+        state.animFrame = requestAnimationFrame(frame);
+      } else {
+        state.animFrame = undefined;
+      }
+    };
+    state.animFrame = requestAnimationFrame(frame);
+  }, []);
+
   useEffect(() => {
     const leaflet = leafletRef.current;
     const map = mapRef.current;
     const layer = layerRef.current;
     if (!mapReady || !leaflet || !map || !layer) return;
 
-    layer.clearLayers();
-    liveMarkerRefs.current.clear();
-    const bounds: Array<[number, number]> = [];
-
     if (mode === 'LIVE') {
+      const currentMemberIds = new Set(locatedTeam.map((m) => m.user_id));
+
+      // Remove stale markers
+      for (const [userId, state] of liveMarkerRefs.current.entries()) {
+        if (!currentMemberIds.has(userId)) {
+          if (state.animFrame) cancelAnimationFrame(state.animFrame);
+          layer.removeLayer(state.marker);
+          liveMarkerRefs.current.delete(userId);
+        }
+      }
+
+      const bounds: Array<[number, number]> = [];
+
       locatedTeam.forEach((member) => {
         const location = member.current_location!;
         const meta = statusMeta[member.shift_status];
-        const icon = leaflet.divIcon({
-          className: 'employee-live-marker',
-          html: `<span class="employee-live-marker-ring" style="--marker-color:${meta.color}"></span><span class="employee-live-marker-dot" style="--marker-color:${meta.color}"></span>`,
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        });
-        const marker = leaflet.marker([location.latitude, location.longitude], { icon }).addTo(layer);
+        const heading = location.heading || 0;
+        const speedKmh = location.speed ? Math.round(location.speed * 3.6) : 0;
+        const isMoving = speedKmh > 2;
+
+        const iconHtml = `
+          <div class="swiggy-marker-wrap" style="--marker-color:${meta.color}">
+            <div class="swiggy-radar-halo"></div>
+            <div class="swiggy-radar-halo-2"></div>
+            <div class="swiggy-vehicle-disc" style="transform: rotate(${heading}deg);">
+              <svg viewBox="0 0 24 24" class="swiggy-vehicle-icon">
+                <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+              </svg>
+            </div>
+            ${isMoving ? `<div class="swiggy-speed-badge">${speedKmh} km/h</div>` : ''}
+          </div>
+        `;
+
+        const existingState = liveMarkerRefs.current.get(member.user_id);
         const telemetry = member.telemetry;
-        marker.bindTooltip(buildTooltip(member.full_name, [
+
+        const tooltipNode = buildTooltip(member.full_name, [
           ['Status', meta.label],
+          ['Speed', isMoving ? `${speedKmh} km/h (Moving)` : 'Stationary'],
           ['Location', location.address_name || 'Address unavailable'],
           ['Last ping', formatTime(location.last_ping_at)],
           ['Accuracy', `±${Math.round(location.accuracy)} m`],
@@ -178,29 +261,72 @@ export default function LiveMapPage() {
           ['Developer options', telemetry?.developer_options_enabled === undefined ? 'Not reported' : telemetry.developer_options_enabled ? 'On' : 'Off'],
           ['Power saver', telemetry?.battery_power_save === undefined ? 'Not reported' : telemetry.battery_power_save ? 'On' : 'Off'],
           ['Mock location', telemetry?.mock_location_detected === undefined ? 'Not reported' : telemetry.mock_location_detected ? 'Detected' : 'Clear'],
-        ]), {
-          direction: 'top',
-          offset: [0, -12],
-          opacity: 1,
-          className: 'perzent-leaflet-tooltip',
-        });
-        marker.on('click', () => {
-          setSelectedId(member.user_id);
-          setMode('DAY');
-        });
-        liveMarkerRefs.current.set(member.user_id, marker);
+        ]);
+
+        if (existingState) {
+          // Update icon & tooltip without tearing down marker
+          const icon = leaflet.divIcon({
+            className: 'employee-live-marker',
+            html: iconHtml,
+            iconSize: [46, 46],
+            iconAnchor: [23, 23],
+          });
+          existingState.marker.setIcon(icon);
+          existingState.marker.setTooltipContent(tooltipNode);
+
+          // Smoothly glide marker to new coordinates
+          if (existingState.lat !== location.latitude || existingState.lng !== location.longitude) {
+            animateMarker(existingState, location.latitude, location.longitude, heading);
+          }
+        } else {
+          // New marker creation
+          const icon = leaflet.divIcon({
+            className: 'employee-live-marker',
+            html: iconHtml,
+            iconSize: [46, 46],
+            iconAnchor: [23, 23],
+          });
+          const marker = leaflet.marker([location.latitude, location.longitude], { icon }).addTo(layer);
+          marker.bindTooltip(tooltipNode, {
+            direction: 'top',
+            offset: [0, -18],
+            opacity: 1,
+            className: 'perzent-leaflet-tooltip',
+          });
+          marker.on('click', () => {
+            setSelectedId(member.user_id);
+            setMode('DAY');
+          });
+
+          liveMarkerRefs.current.set(member.user_id, {
+            marker,
+            lat: location.latitude,
+            lng: location.longitude,
+            heading,
+          });
+        }
         bounds.push([location.latitude, location.longitude]);
       });
-    } else if (playback) {
+
+      // Fit bounds only on initial load
+      if (!lastRefreshed && bounds.length > 0) {
+        if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
+        if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
+      }
+    } else if (mode === 'DAY' && playback) {
+      layer.clearLayers();
+      liveMarkerRefs.current.clear();
+      const bounds: Array<[number, number]> = [];
+
       const positions = playback.waypoints.map((point) => [point.latitude, point.longitude] as [number, number]);
       if (positions.length > 1) {
-        leaflet.polyline(positions, { color: '#2563eb', weight: 4, opacity: 0.7 }).addTo(layer);
+        leaflet.polyline(positions, { color: '#2563eb', weight: 5, opacity: 0.85, className: 'live-trail-dash' }).addTo(layer);
       }
       playback.waypoints.forEach((point, index) => {
         const isStart = index === 0;
         const isEnd = index === playback.waypoints.length - 1;
         const marker = leaflet.circleMarker([point.latitude, point.longitude], {
-          radius: isStart || isEnd ? 7 : 4,
+          radius: isStart || isEnd ? 8 : 4,
           color: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#ffffff',
           weight: isStart || isEnd ? 3 : 2,
           fillColor: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#2563eb',
@@ -210,7 +336,7 @@ export default function LiveMapPage() {
           isStart ? 'Shift started' : isEnd ? 'Latest / final point' : `Route point ${index + 1}`,
           [
             ['Time', formatTime(point.recorded_at)],
-            ['Speed', `${Math.round(point.speed)} km/h`],
+            ['Speed', `${Math.round(point.speed * 3.6)} km/h`],
             ['Accuracy', `±${Math.round(point.accuracy)} m`],
           ]
         ), { direction: 'top', offset: [0, -8], opacity: 1, className: 'perzent-leaflet-tooltip' });
@@ -218,7 +344,7 @@ export default function LiveMapPage() {
       });
       playback.stops.forEach((stop) => {
         const marker = leaflet.circleMarker([stop.latitude, stop.longitude], {
-          radius: 8,
+          radius: 9,
           color: '#ffffff',
           weight: 3,
           fillColor: '#f59e0b',
@@ -231,16 +357,16 @@ export default function LiveMapPage() {
         ]), { direction: 'top', offset: [0, -9], opacity: 1, className: 'perzent-leaflet-tooltip' });
         bounds.push([stop.latitude, stop.longitude]);
       });
-    }
 
-    if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
-    if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
-  }, [locatedTeam, mapReady, mode, playback]);
+      if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
+      if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
+    }
+  }, [locatedTeam, mapReady, mode, playback, animateMarker, lastRefreshed]);
 
   const focusLiveEmployee = (member: LiveTeamMember) => {
-    const marker = liveMarkerRefs.current.get(member.user_id);
-    if (!marker || !member.current_location) return;
-    marker.openTooltip();
+    const state = liveMarkerRefs.current.get(member.user_id);
+    if (!state || !member.current_location) return;
+    state.marker.openTooltip();
     mapRef.current?.panTo([member.current_location.latitude, member.current_location.longitude], { animate: true });
   };
 
