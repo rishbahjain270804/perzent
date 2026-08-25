@@ -7,6 +7,7 @@ const SettingsSchema = z.object({
   auto_checkout_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   max_break_minutes: z.number().int().min(5).max(180),
   timezone: z.string().min(1).max(100),
+  standard_daily_hours: z.number().min(1).max(24).optional(),
 });
 
 export async function GET(request: Request) {
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       auto_checkout_time: company.auto_checkout_time,
       max_break_minutes: company.max_break_minutes,
+      standard_daily_hours: company.standard_daily_hours,
       route_retention_days: company.route_retention_days,
       attendance_retention_days: company.attendance_retention_days,
       timezone: company.timezone,
@@ -39,6 +41,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({
       auto_checkout_time: company.auto_checkout_time,
       max_break_minutes: company.max_break_minutes,
+      standard_daily_hours: company.standard_daily_hours,
       route_retention_days: company.route_retention_days,
       attendance_retention_days: company.attendance_retention_days,
       timezone: company.timezone,
