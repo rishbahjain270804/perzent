@@ -37,8 +37,8 @@ export class DeviceIntegrityService {
       bgPermission = await Location.requestBackgroundPermissionsAsync();
     }
 
-    // Must be "Allow all the time" (granted for background)
-    const locationPermissionGranted = fgPermission.granted && bgPermission.granted;
+    // Foreground permission is sufficient to start shift; background is recommended
+    const locationPermissionGranted = fgPermission.granted;
     const locationServicesEnabled = await Location.hasServicesEnabledAsync().catch(() => false);
 
     if (Platform.OS === 'android' && !nativeIntegrity) {
@@ -58,14 +58,11 @@ export class DeviceIntegrityService {
     if (!locationPermissionGranted) {
       blockers.push({
         code: 'LOCATION_PERMISSION',
-        message: 'Location permission must be set to "Allow all the time" (Always Allow).',
+        message: 'Location permission is required. Please grant location access.',
       });
     }
     if (!locationServicesEnabled) {
       blockers.push({ code: 'LOCATION_SERVICES', message: 'Turn on Location Services (GPS).' });
-    }
-    if (Platform.OS === 'android' && native.developerOptionsEnabled) {
-      blockers.push({ code: 'DEVELOPER_OPTIONS', message: 'Turn off Developer Options.' });
     }
     if (native.powerSaveMode) {
       blockers.push({ code: 'POWER_SAVER', message: 'Turn off Battery Saver / Power Saving mode.' });

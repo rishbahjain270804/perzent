@@ -11,12 +11,11 @@ const todayIst = () => {
 
 const complianceError = (integrity: any) => {
   if (!integrity || typeof integrity !== 'object') return 'Device compliance verification is required';
-  if (integrity.location_permission_granted !== true) return 'Location permission must be set to "Allow all the time"';
+  if (integrity.location_permission_granted !== true) return 'Location permission is required';
   if (integrity.location_services_enabled !== true) return 'Location Services (GPS) must be enabled';
-  if (integrity.developer_options_enabled !== false) return 'Developer Options must be disabled and verified';
-  if (integrity.battery_power_save !== false) return 'Battery Saver / Power Saving mode must be disabled and verified';
+  if (integrity.battery_power_save !== false) return 'Battery Saver / Power Saving mode must be disabled';
   if (!Number.isFinite(integrity.battery_level) || integrity.battery_level < 5) return 'Battery must be at least 5%';
-  if (integrity.mock_location_detected !== false) return 'A clear mock-location check is required';
+  if (integrity.mock_location_detected !== false) return 'Mock/fake location apps must be disabled';
   return null;
 };
 
@@ -29,15 +28,13 @@ export async function GET(request: Request) {
       include: { breaks: { where: { end_time: null }, orderBy: { start_time: 'desc' }, take: 1 } },
     });
 
-    const isFinished = Boolean(attendance && ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status));
-
     return NextResponse.json({
       status: attendance?.status || 'CHECKED_OUT',
       attendance_id: attendance?.id || null,
       punch_in_time: attendance?.punch_in_time ? attendance.punch_in_time.toISOString() : null,
       punch_out_time: attendance?.punch_out_time ? attendance.punch_out_time.toISOString() : null,
       active_break_started_at: attendance?.breaks[0]?.start_time ? attendance.breaks[0].start_time.toISOString() : null,
-      already_completed_today: isFinished,
+      already_completed_today: false,
       server_time: new Date().toISOString(),
     });
   } catch (error) {
@@ -56,12 +53,31 @@ export async function POST(request: Request) {
     });
 
     if (body.action === 'check_in') {
+      const blockedReason = complianceError(body.integrity);
+      if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
+      if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
+        return NextResponse.json({ error: 'A verified GPS position is required' }, { status: 400 });
+      }
+
+      const now = new Date();
       if (attendance) {
         if (['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
+          const updated = await prisma.attendanceRecord.update({
+            where: { id: attendance.id },
+            data: {
+              status: 'CHECKED_IN',
+              punch_out_time: null,
+              punch_out_by: null,
+              punch_out_lat: null,
+              punch_out_lng: null,
+            },
+          });
           return NextResponse.json({
-            error: 'You have already completed your shift for today. Only 1 check-in is permitted per calendar date (IST).',
-            already_completed_today: true,
-          }, { status: 409 });
+            status: updated.status,
+            attendance_id: updated.id,
+            punch_in_time: updated.punch_in_time.toISOString(),
+            server_time: now.toISOString(),
+          }, { status: 200 });
         }
         return NextResponse.json({
           error: 'You already have an active shift for today.',
@@ -70,13 +86,6 @@ export async function POST(request: Request) {
         }, { status: 409 });
       }
 
-      const blockedReason = complianceError(body.integrity);
-      if (blockedReason) return NextResponse.json({ error: blockedReason }, { status: 400 });
-      if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
-        return NextResponse.json({ error: 'A verified GPS position is required' }, { status: 400 });
-      }
-
-      const now = new Date();
       const created = await prisma.attendanceRecord.create({
         data: {
           user_id: session.userId,

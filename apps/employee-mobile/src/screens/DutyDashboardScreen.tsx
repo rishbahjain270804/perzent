@@ -209,10 +209,6 @@ export default function DutyDashboardScreen({
   };
 
   const handleCheckIn = async () => {
-    if (alreadyCompletedToday) {
-      Alert.alert('Shift limit reached', 'You have already completed your shift for today (IST limit: 1 check-in per day).');
-      return;
-    }
     setActionLoading(true);
     try {
       const verified = await verifiedReadiness();
@@ -473,25 +469,14 @@ export default function DutyDashboardScreen({
             )}
           </View>
 
-          {/* When Already Completed Today: Show Completed Card */}
-          {shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && (
-            <View style={styles.completedCard}>
-              <Text style={styles.completedIcon}>✅</Text>
-              <Text style={styles.completedTitle}>Shift Completed for Today</Text>
-              <Text style={styles.completedSubtitle}>
-                You have already completed your shift for today. Next check-in will open tomorrow (IST).
-              </Text>
-            </View>
-          )}
-
-          {/* When NOT Checked In and NOT completed: Show Check In Button */}
-          {shiftStatus === 'CHECKED_OUT' && !alreadyCompletedToday && (
+          {/* When Checked Out: Show Check In Button */}
+          {shiftStatus === 'CHECKED_OUT' && (
             <TouchableOpacity
               style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
               onPress={handleCheckIn}
               disabled={actionLoading}
             >
-              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Check in'}</Text>
+              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : alreadyCompletedToday ? 'Start Another Shift' : 'Check in'}</Text>
             </TouchableOpacity>
           )}
 
