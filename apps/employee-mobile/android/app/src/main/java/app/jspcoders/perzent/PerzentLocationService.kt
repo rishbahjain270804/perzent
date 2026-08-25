@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.location.Location
@@ -32,6 +34,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,6 +53,8 @@ class PerzentLocationService : Service() {
         const val KEY_USER_ID = "user_id"
         const val KEY_API_BASE = "api_base_url"
         const val KEY_TRACKING_ACTIVE = "tracking_active"
+        const val KEY_OFFLINE_WAYPOINTS = "offline_waypoints_queue_v1"
+        const val MAX_OFFLINE_POINTS = 2000
 
         const val ACTION_START = "app.jspcoders.perzent.ACTION_START_TRACKING"
         const val ACTION_STOP = "app.jspcoders.perzent.ACTION_STOP_TRACKING"
@@ -99,6 +104,7 @@ class PerzentLocationService : Service() {
     private var locationCallback: LocationCallback? = null
     private var locationManager: LocationManager? = null
     private var systemLocationListener: LocationListener? = null
+    private var gpsStateReceiver: BroadcastReceiver? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val httpClient = OkHttpClient.Builder()
@@ -147,6 +153,7 @@ class PerzentLocationService : Service() {
         }
 
         acquireWakeLock()
+        registerGpsStateReceiver(token, apiBase ?: "https://perzent.vercel.app")
         startLocationUpdates(token, userId, apiBase ?: "https://perzent.vercel.app")
 
         return START_STICKY
@@ -189,7 +196,10 @@ class PerzentLocationService : Service() {
         }
     }
 
-    private fun buildForegroundNotification(): Notification {
+    private fun buildForegroundNotification(
+        title: String = "Perzent • On Duty Active",
+        content: String = "Continuous shift tracking active • GPS sync on"
+    ): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -202,13 +212,46 @@ class PerzentLocationService : Service() {
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Perzent • On Duty Active")
-            .setContentText("Continuous shift tracking active • GPS sync on")
+            .setContentTitle(title)
+            .setContentText(content)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(pendingIntent)
             .build()
+    }
+
+    private fun registerGpsStateReceiver(token: String, apiBase: String) {
+        if (gpsStateReceiver != null) return
+        gpsStateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                val isGpsEnabled = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+                Log.i(TAG, "Location provider state change detected. GPS active: $isGpsEnabled")
+
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                if (!isGpsEnabled) {
+                    val warnNotif = buildForegroundNotification(
+                        title = "⚠️ Location (GPS) Disabled",
+                        content = "Turn on Location (GPS) immediately to maintain active duty tracking"
+                    )
+                    notificationManager?.notify(NOTIFICATION_ID, warnNotif)
+                } else {
+                    val normalNotif = buildForegroundNotification(
+                        title = "Perzent • On Duty Active",
+                        content = "Continuous shift tracking active • GPS sync on"
+                    )
+                    notificationManager?.notify(NOTIFICATION_ID, normalNotif)
+
+                    val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val currentToken = prefs.getString(KEY_TOKEN, token) ?: token
+                    val currentUserId = prefs.getString(KEY_USER_ID, "") ?: ""
+                    startLocationUpdates(currentToken, currentUserId, apiBase)
+                }
+            }
+        }
+        val filter = IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
+        registerReceiver(gpsStateReceiver, filter)
     }
 
     private fun startLocationUpdates(token: String, userId: String, apiBase: String) {
@@ -219,13 +262,12 @@ class PerzentLocationService : Service() {
 
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
                 .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
-                .setMaxUpdateDelayMillis(UPDATE_INTERVAL_MS)
                 .setWaitForAccurateLocation(false)
                 .build()
 
             locationCallback = object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    val location = locationResult.lastLocation ?: return
+                override fun onLocationResult(result: LocationResult) {
+                    val location = result.lastLocation ?: return
                     handleNewLocation(location, token, userId, apiBase)
                 }
             }
@@ -235,16 +277,21 @@ class PerzentLocationService : Service() {
                 locationCallback!!,
                 Looper.getMainLooper()
             )
-            Log.i(TAG, "FusedLocationProvider updates registered successfully")
+            Log.i(TAG, "FusedLocationProviderClient updates started (15s interval)")
         } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission missing for FusedLocationProvider", e)
+            Log.e(TAG, "Location permission missing for FusedLocationProviderClient", e)
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting FusedLocationProvider, falling back to LocationManager", e)
+            Log.e(TAG, "Failed to start FusedLocationProviderClient, falling back to LocationManager", e)
             startSystemLocationFallback(token, userId, apiBase)
         }
+
+        // Secondary fallback to native Android LocationManager
+        startSystemLocationFallback(token, userId, apiBase)
     }
 
     private fun startSystemLocationFallback(token: String, userId: String, apiBase: String) {
+        if (locationManager != null && systemLocationListener != null) return
+
         try {
             locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
             systemLocationListener = object : LocationListener {
@@ -279,6 +326,62 @@ class PerzentLocationService : Service() {
         }
     }
 
+    private fun saveOfflineWaypoint(waypointJson: JSONObject) {
+        try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val existingStr = prefs.getString(KEY_OFFLINE_WAYPOINTS, "[]") ?: "[]"
+            val array = JSONArray(existingStr)
+            array.put(waypointJson)
+
+            val trimmed = if (array.length() > MAX_OFFLINE_POINTS) {
+                val newArr = JSONArray()
+                val start = array.length() - MAX_OFFLINE_POINTS
+                for (i in start until array.length()) {
+                    newArr.put(array.get(i))
+                }
+                newArr
+            } else {
+                array
+            }
+            prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, trimmed.toString()).apply()
+            Log.i(TAG, "Stored waypoint locally in offline queue. Total queued: ${trimmed.length()}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save offline waypoint", e)
+        }
+    }
+
+    private fun flushOfflineWaypoints(token: String, apiBase: String) {
+        try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val existingStr = prefs.getString(KEY_OFFLINE_WAYPOINTS, "[]") ?: "[]"
+            val array = JSONArray(existingStr)
+            if (array.length() == 0) return
+
+            Log.i(TAG, "Attempting to flush ${array.length()} offline queued waypoints")
+            val batchObj = JSONObject().apply {
+                put("waypoints", array)
+            }
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = batchObj.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$apiBase/api/mobile/waypoints")
+                .post(requestBody)
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, "[]").apply()
+                Log.i(TAG, "Successfully flushed ${array.length()} offline queued waypoints to server!")
+            }
+            response.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Offline flush attempt deferred (network still unavailable): ${e.message}")
+        }
+    }
+
     private fun handleNewLocation(location: Location, token: String, userId: String, apiBase: String) {
         val nowIso = formatIso8601(Date(location.time.takeIf { it > 0 } ?: System.currentTimeMillis()))
         val isMock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -291,15 +394,18 @@ class PerzentLocationService : Service() {
         Log.d(TAG, "GPS fix: lat=${location.latitude}, lng=${location.longitude}, acc=${location.accuracy}, mock=$isMock")
 
         Thread {
+            val waypointJson = JSONObject().apply {
+                put("latitude", location.latitude)
+                put("longitude", location.longitude)
+                put("accuracy", location.accuracy.toDouble())
+                put("speed", location.speed.toDouble())
+                put("heading", location.bearing.toDouble())
+                put("recorded_at", nowIso)
+            }
+
             try {
-                val waypointJson = JSONObject().apply {
-                    put("latitude", location.latitude)
-                    put("longitude", location.longitude)
-                    put("accuracy", location.accuracy.toDouble())
-                    put("speed", location.speed.toDouble())
-                    put("heading", location.bearing.toDouble())
-                    put("recorded_at", nowIso)
-                }
+                // First try flushing any previously queued offline waypoints
+                flushOfflineWaypoints(token, apiBase)
 
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val requestBody = waypointJson.toString().toRequestBody(mediaType)
@@ -312,10 +418,15 @@ class PerzentLocationService : Service() {
                     .build()
 
                 val response = httpClient.newCall(request).execute()
-                Log.d(TAG, "Waypoint POST response: code=${response.code}")
+                if (response.isSuccessful) {
+                    Log.d(TAG, "Waypoint POST response: code=${response.code}")
+                } else {
+                    saveOfflineWaypoint(waypointJson)
+                }
                 response.close()
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to send waypoint to server: ${e.message}")
+                Log.w(TAG, "Network down / waypoint POST failed: ${e.message}. Saving to local offline queue.")
+                saveOfflineWaypoint(waypointJson)
             }
 
             val nowMs = System.currentTimeMillis()
@@ -334,12 +445,14 @@ class PerzentLocationService : Service() {
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val isGpsEnabled = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
 
         val telemetryObj = JSONObject().apply {
             put("battery_level", batteryLevel)
             put("battery_power_save", powerManager.isPowerSaveMode)
             put("mock_location_detected", isMock)
-            put("location_services_enabled", true)
+            put("location_services_enabled", isGpsEnabled)
             put("location_permission_granted", true)
             put("updated_at", formatIso8601(Date()))
         }
@@ -385,6 +498,14 @@ class PerzentLocationService : Service() {
 
     private fun stopTracking() {
         stopLocationUpdates()
+        try {
+            if (gpsStateReceiver != null) {
+                unregisterReceiver(gpsStateReceiver)
+                gpsStateReceiver = null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering gps receiver", e)
+        }
         releaseWakeLock()
     }
 
