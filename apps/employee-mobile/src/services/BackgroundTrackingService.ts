@@ -1,5 +1,5 @@
 ﻿import { NativeModules, Platform } from 'react-native';
-import { BASE_URL } from '../config/api';
+import { API_CONFIG } from '../config/api';
 
 const nativeModule = NativeModules.PerzentBackgroundTracking as
   | {
@@ -14,10 +14,13 @@ export class BackgroundTrackingService {
    * Starts the native Android sticky foreground service.
    * This service runs 24/7 in background and survives app swipe/removal from recent menu.
    */
-  static async start(token: string, userId: string): Promise<void> {
+  static async start(token?: string, userId?: string): Promise<void> {
     if (Platform.OS !== 'android' || !nativeModule) return;
     try {
-      await nativeModule.startTracking(token, userId, BASE_URL);
+      const safeToken = token || '';
+      const safeUserId = userId || '';
+      const safeBaseUrl = API_CONFIG?.BASE_URL || 'https://perzent.vercel.app';
+      await nativeModule.startTracking(safeToken, safeUserId, safeBaseUrl);
     } catch (err) {
       console.warn('[BackgroundTrackingService] Failed to start native tracking service:', err);
     }

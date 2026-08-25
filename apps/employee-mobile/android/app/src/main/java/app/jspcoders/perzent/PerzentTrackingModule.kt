@@ -12,9 +12,16 @@ class PerzentTrackingModule(
     override fun getName(): String = "PerzentBackgroundTracking"
 
     @ReactMethod
-    fun startTracking(token: String, userId: String, apiBaseUrl: String, promise: Promise) {
+    fun startTracking(token: String?, userId: String?, apiBaseUrl: String?, promise: Promise) {
         try {
-            PerzentLocationService.startService(reactContext, token, userId, apiBaseUrl)
+            val safeToken = token ?: ""
+            val safeUserId = userId ?: ""
+            val safeApiBase = if (apiBaseUrl.isNullOrBlank() || apiBaseUrl == "undefined") {
+                "https://perzent.vercel.app"
+            } else {
+                apiBaseUrl
+            }
+            PerzentLocationService.startService(reactContext, safeToken, safeUserId, safeApiBase)
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("TRACKING_START_ERROR", "Failed to start background tracking service", e)

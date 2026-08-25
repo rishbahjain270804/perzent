@@ -119,7 +119,7 @@ export default function DutyDashboardScreen({
           setBreakTimerSec(Math.max(0, 1800 - used));
         }
         if (status === 'CHECKED_IN') {
-          BackgroundTrackingService.start(session.token, session.user_id);
+          BackgroundTrackingService.start(session.token, session.id || session.user_id);
         } else if (status === 'CHECKED_OUT') {
           BackgroundTrackingService.stop();
         }
@@ -231,7 +231,7 @@ export default function DutyDashboardScreen({
       setElapsedSec(initialSec);
       setShiftStatus(result.status);
       ShiftNotificationService.updateLiveNotification(formatDuration(initialSec), 'CHECKED_IN');
-      BackgroundTrackingService.start(session.token, session.user_id);
+      BackgroundTrackingService.start(session.token, session.id || session.user_id);
       Alert.alert('Shift started', 'Your location and attendance were verified.');
     } catch (error: any) {
       Alert.alert('Check-in failed', error.message);
@@ -305,7 +305,7 @@ export default function DutyDashboardScreen({
       setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
       ShiftNotificationService.updateLiveNotification(formatDuration(elapsedSec), 'CHECKED_IN');
-      BackgroundTrackingService.start(session.token, session.user_id);
+      BackgroundTrackingService.start(session.token, session.id || session.user_id);
     } catch (error: any) {
       Alert.alert('Resume failed', error.message);
     } finally {
