@@ -32,6 +32,7 @@ enum PunchBy {
   MANAGER
   OWNER
   AUTO_SYSTEM
+  KIOSK
 }
 
 enum BreakType {
@@ -50,6 +51,8 @@ enum TamperEventType {
   GPS_DISABLED
   PERMISSION_REVOKED
   MOCK_LOCATION_DETECTED
+  FACE_MISMATCH
+  GEOFENCE_BREACH
 }
 
 enum PaymentStatus {
@@ -57,6 +60,20 @@ enum PaymentStatus {
   PAID
   FAILED
   REFUNDED
+}
+
+enum LeaveType {
+  CASUAL
+  SICK
+  PAID
+  UNPAID
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 model Company {
@@ -68,12 +85,15 @@ model Company {
   max_break_minutes          Int            @default(30)
   route_retention_days       Int            @default(15)
   attendance_retention_days  Int            @default(45)
+  standard_daily_hours       Float          @default(8.0)
   plan_tier                  String         @default("FREE")
   created_at                 DateTime       @default(now())
   updated_at                 DateTime       @updatedAt
 
   users                      User[]
   departments                Department[]
+  sites                      GeofenceSite[]
+  leave_requests             LeaveRequest[]
   payments                   PaymentTransaction[]
 }
 
@@ -90,6 +110,24 @@ model Department {
   @@unique([company_id, name])
 }
 
+model GeofenceSite {
+  id             String    @id @default(uuid())
+  company_id     String
+  name           String
+  address        String?
+  latitude       Float
+  longitude      Float
+  radius_meters  Float     @default(150.0)
+  is_active      Boolean   @default(true)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  company        Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  attendances    AttendanceRecord[]
+
+  @@index([company_id, is_active])
+}
+
 model User {
   id            String       @id @default(uuid())
   company_id    String
@@ -102,6 +140,12 @@ model User {
   role          Role         @default(EMPLOYEE)
   designation   String
   status        UserStatus   @default(ACTIVE)
+  avatar_url    String?
+  face_enrolled Boolean      @default(false)
+  face_encoding Json?
+  paid_leave_balance Float   @default(12.0)
+  sick_leave_balance Float   @default(6.0)
+  casual_leave_balance Float @default(6.0)
   created_at    DateTime     @default(now())
   updated_at    DateTime     @updatedAt
 
@@ -115,6 +159,8 @@ model User {
   waypoints     LocationWaypoint[]
   tamper_logs   TamperLog[]
   sessions      Session[]
+  leave_requests LeaveRequest[] @relation("EmployeeLeaves")
+  approved_leaves LeaveRequest[] @relation("ApprovedLeaves")
   managed_payment_orders PaymentTransaction[] @relation("PaymentManager")
   provisioned_payments   PaymentTransaction[] @relation("ProvisionedUser")
 
@@ -145,6 +191,7 @@ model UserDevice {
 model AttendanceRecord {
   id                       String       @id @default(uuid())
   user_id                  String
+  site_id                  String?
   work_date                DateTime     @db.Date
   punch_in_time            DateTime
   punch_out_time           DateTime?
@@ -156,14 +203,20 @@ model AttendanceRecord {
   punch_in_lng             Float?
   punch_out_lat            Float?
   punch_out_lng            Float?
+  punch_in_selfie_url      String?
+  punch_out_selfie_url     String?
+  is_face_verified         Boolean      @default(false)
+  is_geofence_verified     Boolean      @default(false)
   status                   ShiftStatus  @default(CHECKED_IN)
   gross_worked_minutes     Int          @default(0)
   total_break_minutes      Int          @default(0)
   net_worked_minutes       Int          @default(0)
+  overtime_minutes         Int          @default(0)
   created_at               DateTime     @default(now())
   updated_at               DateTime     @updatedAt
 
   user                     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  site                     GeofenceSite? @relation(fields: [site_id], references: [id], onDelete: SetNull)
   breaks                   AttendanceBreak[]
   stops                    LocationStop[]
   waypoints                LocationWaypoint[]
@@ -171,6 +224,7 @@ model AttendanceRecord {
 
   @@unique([user_id, work_date])
   @@index([work_date, status])
+  @@index([site_id])
 }
 
 model AttendanceBreak {
@@ -223,6 +277,30 @@ model LocationWaypoint {
 
   @@index([user_id, recorded_at])
   @@index([attendance_id, recorded_at])
+}
+
+model LeaveRequest {
+  id             String      @id @default(uuid())
+  company_id     String
+  user_id        String
+  leave_type     LeaveType   @default(CASUAL)
+  start_date     DateTime    @db.Date
+  end_date       DateTime    @db.Date
+  total_days     Float       @default(1.0)
+  reason         String
+  status         LeaveStatus @default(PENDING)
+  reviewed_by_id String?
+  reviewed_at    DateTime?
+  review_notes   String?
+  created_at     DateTime    @default(now())
+  updated_at     DateTime    @updatedAt
+
+  company        Company     @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user           User        @relation("EmployeeLeaves", fields: [user_id], references: [id], onDelete: Cascade)
+  reviewer       User?       @relation("ApprovedLeaves", fields: [reviewed_by_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id, status, start_date])
+  @@index([user_id, status])
 }
 
 model TamperLog {

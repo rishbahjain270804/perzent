@@ -16,6 +16,7 @@
     "@expo/metro-runtime": "~4.0.1",
     "@perzent/location-engine": "workspace:*",
     "@perzent/shared-types": "workspace:*",
+    "@react-native-async-storage/async-storage": "1.23.1",
     "expo": "~52.0.0",
     "expo-application": "~6.0.2",
     "expo-asset": "~11.0.5",

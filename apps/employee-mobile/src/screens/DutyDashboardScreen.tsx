@@ -15,6 +15,7 @@ import { DeviceIntegrityService, WorkReadiness } from '../services/DeviceIntegri
 import { EmployeeApi } from '../services/EmployeeApi';
 import { AutoUpdateService } from '../services/AutoUpdateService';
 import { ShiftNotificationService } from '../services/ShiftNotificationService';
+import { WaypointQueueService } from '../services/WaypointQueueService';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -168,16 +169,16 @@ export default function DutyDashboardScreen({
     return () => clearInterval(timer);
   }, [shiftStatus, updateClocks]);
 
-  // High-frequency 15-second background waypoint ping while checked in with 2-minute stall tracking
+  // High-frequency 15-second background waypoint ping while checked in with resilient offline queuing
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
     const pingLocation = async () => {
       try {
         const pos = await EmployeeApi.currentPosition();
-        await EmployeeApi.sendWaypoint(session, pos);
+        await WaypointQueueService.recordPosition(session, pos);
         setLastWaypointTime(Date.now());
       } catch {
-        // Silent failure for transient background blips
+        // Enqueue if pos was captured or keep queue intact
       }
     };
     pingLocation();
@@ -246,8 +247,10 @@ export default function DutyDashboardScreen({
           setActionLoading(true);
           try {
             const position = await EmployeeApi.currentPosition();
+            await WaypointQueueService.flushQueue(session).catch(() => undefined);
             await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
             await ShiftNotificationService.dismiss();
+            await WaypointQueueService.clear().catch(() => undefined);
             setShiftStatus('CHECKED_OUT');
             setAlreadyCompletedToday(true);
             setPunchInTimestamp(null);

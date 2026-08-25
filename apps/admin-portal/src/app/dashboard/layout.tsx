@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
+  BarChart3,
   CalendarCheck,
+  CalendarDays,
+  FileSpreadsheet,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -15,6 +18,7 @@ import {
   Settings,
   Smartphone,
   Sun,
+  Tablet,
   Users,
   X,
 } from 'lucide-react';
@@ -45,7 +49,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Live Map', href: '/dashboard/live-map', icon: MapPin },
     { name: 'Routes', href: '/dashboard/routes', icon: Route },
     { name: 'Attendance', href: '/dashboard/attendance', icon: CalendarCheck },
+    { name: 'Timesheets', href: '/dashboard/timesheets', icon: FileSpreadsheet },
+    { name: 'Leaves & PTO', href: '/dashboard/leaves', icon: CalendarDays },
+    { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
     { name: 'Employees', href: '/dashboard/employees', icon: Users },
+    { name: 'Kiosk Mode', href: '/kiosk', icon: Tablet },
     { name: 'Billing', href: '/dashboard/billing', icon: Receipt },
     { name: 'Download', href: '/download', icon: Smartphone },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
