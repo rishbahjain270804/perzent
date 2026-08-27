@@ -83,7 +83,7 @@ class PerzentLocationService : Service() {
         const val KEY_DIRECT_URL = "direct_url"
         const val KEY_DIRECT_ANON = "direct_anon_key"
         const val KEY_DIRECT_TOKEN = "direct_token"
-        const val DEFAULT_API_BASE = "https://perzent.vercel.app"
+        const val DEFAULT_API_BASE = "https://perzent.jspcoders.app"
 
         const val MAX_OFFLINE_POINTS = 3000
         const val MAX_BATCH_SIZE = 500

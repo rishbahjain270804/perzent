@@ -52,7 +52,7 @@ export class BackgroundTrackingService {
       await nativeModule.startTracking(
         token || '',
         userId || '',
-        API_CONFIG.BASE_URL || 'https://perzent.vercel.app',
+        API_CONFIG.BASE_URL || 'https://perzent.jspcoders.app',
         Number.isFinite(punchInEpochMs) ? (punchInEpochMs as number) : Date.now(),
         direct?.url || '',
         direct?.anon_key || '',

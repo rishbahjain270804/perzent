@@ -21,6 +21,7 @@ import {
   Sun,
   Users,
   X,
+  LifeBuoy,
 } from 'lucide-react';
 import { apiFetch, errorMessage, ApiError, type SessionInfo } from '@/lib/client';
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -46,6 +47,7 @@ const NAV_ITEMS = [
   { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings, ownerOnly: true },
   { name: 'Plan', href: '/dashboard/billing', icon: Receipt, ownerOnly: true },
+  { name: 'Help', href: '/support', icon: LifeBuoy },
 ];
 
 const BOTTOM_BAR = ['/dashboard', '/dashboard/live-map', '/dashboard/attendance', '/dashboard/employees'];

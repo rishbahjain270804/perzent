@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Image,
+  Linking,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { DeviceBindingService } from '../services/DeviceBindingService';
 import { EmployeeApi } from '../services/EmployeeApi';
+import { BRAND } from '@perzent/shared-types';
 import { AutoUpdateService } from '../services/AutoUpdateService';
 
 export default function LoginScreen({
@@ -103,6 +105,19 @@ export default function LoginScreen({
         </TouchableOpacity>
 
         <Text style={styles.footer}>Accounts are created by your employer.</Text>
+        <View style={styles.helpRow}>
+          <TouchableOpacity onPress={() => Linking.openURL(`${BRAND.webUrl}${BRAND.faqPath}`).catch(() => undefined)}>
+            <Text style={styles.helpLink}>FAQ</Text>
+          </TouchableOpacity>
+          <Text style={styles.helpDot}>•</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(`${BRAND.webUrl}${BRAND.supportPath}`).catch(() => undefined)}>
+            <Text style={styles.helpLink}>Support</Text>
+          </TouchableOpacity>
+          <Text style={styles.helpDot}>•</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(`mailto:${BRAND.supportEmail}`).catch(() => undefined)}>
+            <Text style={styles.helpLink}>{BRAND.supportEmail}</Text>
+          </TouchableOpacity>
+        </View>
         <Image source={require('../../assets/developed-by-jsp-coders.png')} style={styles.branding} resizeMode="contain" accessibilityLabel="Developed by JSP Coders" />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -181,4 +196,7 @@ const styles = StyleSheet.create({
   },
   footer: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 16 },
   branding: { alignSelf: 'center', width: 180, height: 72, marginTop: 20 },
+  helpRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' },
+  helpLink: { color: '#16A34A', fontSize: 12, fontWeight: '600' },
+  helpDot: { color: '#CBD5E1', fontSize: 12 },
 });

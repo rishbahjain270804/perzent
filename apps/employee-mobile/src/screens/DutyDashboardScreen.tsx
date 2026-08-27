@@ -21,6 +21,7 @@ import { WaypointQueueService } from '../services/WaypointQueueService';
 import { BackgroundTrackingService } from '../services/BackgroundTrackingService';
 import { SessionEvents } from '../services/SessionEvents';
 import { DirectAccess } from '../services/DirectAccess';
+import { BRAND } from '@perzent/shared-types';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -36,7 +37,11 @@ const JS_PING_INTERVAL_MS = 2 * 60 * 1000;
 /** The native service heartbeats telemetry every 45 s while tracking; the JS side only needs a slow backup cadence. */
 const ON_DUTY_TELEMETRY_INTERVAL_MS = 2 * 60 * 1000;
 const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
-const PRIVACY_POLICY_URL = 'https://perzent.vercel.app/privacy';
+const PRIVACY_POLICY_URL = `${BRAND.webUrl}${BRAND.privacyPath}`;
+const FAQ_URL = `${BRAND.webUrl}${BRAND.faqPath}`;
+const SUPPORT_URL = `${BRAND.webUrl}${BRAND.supportPath}`;
+const DEVELOPER_HOST = BRAND.developerUrl.split('//').pop() ?? BRAND.developerUrl;
+const openUrl = (url: string) => Linking.openURL(url).catch(() => undefined);
 /** Server codes that mean our local shift state drifted from the server's: re-sync after showing the error. */
 const STATE_DRIFT_CODES = new Set(['NO_ACTIVE_SHIFT', 'SHIFT_ACTIVE', 'BREAK_ACTIVE', 'NO_ACTIVE_BREAK']);
 
@@ -824,8 +829,27 @@ export default function DutyDashboardScreen({
             <Text style={styles.privacyText}>
               Your precise location is shared with your employer only while you are checked in. Sharing pauses on breaks and stops at check-out. Device compliance details are visible only to authorized management.
             </Text>
-            <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}>
+            <TouchableOpacity onPress={() => openUrl(PRIVACY_POLICY_URL)}>
               <Text style={styles.privacyLink}>Read the privacy policy</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.helpCard}>
+            <Text style={styles.helpTitle}>Need help?</Text>
+            <Text style={styles.helpText}>Ask your manager first for passwords, device resets and attendance fixes. For app problems, see the FAQ or contact support.</Text>
+            <View style={styles.helpRow}>
+              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(FAQ_URL)}>
+                <Text style={styles.helpChipText}>FAQ</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(SUPPORT_URL)}>
+                <Text style={styles.helpChipText}>Support</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent(`Perzent app v${AutoUpdateService.getCurrentVersion().version}`)}`)}>
+                <Text style={styles.helpChipText}>Email</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={() => openUrl(BRAND.developerUrl)}>
+              <Text style={styles.developerLink}>Developed by {BRAND.developerName} · {DEVELOPER_HOST}</Text>
             </TouchableOpacity>
           </View>
 
@@ -1217,6 +1241,13 @@ const styles = StyleSheet.create({
   privacyTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   privacyText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
   privacyLink: { color: '#166534', fontSize: 12, fontWeight: '800', marginTop: 8, textDecorationLine: 'underline' },
+  helpCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginTop: 14, borderWidth: 1, borderColor: '#E2E8F0' },
+  helpTitle: { color: '#0F172A', fontSize: 14, fontWeight: '800' },
+  helpText: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 4 },
+  helpRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  helpChip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0' },
+  helpChipText: { color: '#166534', fontSize: 12, fontWeight: '700' },
+  developerLink: { color: '#94A3B8', fontSize: 11, marginTop: 12 },
 
   // Team styles
   teamContainer: { marginTop: 4 },

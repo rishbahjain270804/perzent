@@ -68,7 +68,7 @@ Sanity-test the release bundle on a real device before uploading, e.g. with
 2. **App signing**: enrol in Play App Signing when uploading the first bundle. Play holds the
    app-signing key; `perzent-release.keystore` becomes the *upload* key. Keep it backed up anyway.
 3. Store listing: name, short/full description, screenshots, feature graphic, app icon.
-4. **Privacy policy URL**: `https://perzent.vercel.app/privacy` (must mention background location,
+4. **Privacy policy URL**: `https://perzent.jspcoders.app/privacy` (must mention background location,
    what is collected, who receives it, retention, and how to request deletion).
 5. App content declarations (all under *Policy > App content*):
    - **Data safety** form - see section 5.
@@ -130,7 +130,7 @@ Play requires a separate declaration + review for `ACCESS_BACKGROUND_LOCATION`.
      portal receiving live points.
   6. Start break (notification disappears) -> resume -> check out (notification gone).
   Upload the video (YouTube unlisted link is fine) in the declaration form.
-- Privacy policy link: `https://perzent.vercel.app/privacy`.
+- Privacy policy link: `https://perzent.jspcoders.app/privacy`.
 
 ## 7. Target API level
 

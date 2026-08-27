@@ -150,7 +150,11 @@ export default function LandingPage() {
       <footer className="px-4 sm:px-6 py-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-[#6B7280]">
         <span>© 2026 Perzent · operated by JSP Coders</span>
         <nav className="flex flex-wrap items-center gap-3" aria-label="Footer">
+          <Link href="/faq" className="hover:text-white">FAQ</Link>
+          <Link href="/support" className="hover:text-white">Support</Link>
           <Link href="/privacy" className="hover:text-white">Privacy policy</Link>
+          <Link href="/terms" className="hover:text-white">Terms</Link>
+          <Link href="/account-deletion" className="hover:text-white">Account deletion</Link>
           <Link href="/download" className="hover:text-white">Android app</Link>
           <Link href="/login" className="hover:text-white">Sign in</Link>
           <Link href="/register" className="hover:text-white">Register</Link>

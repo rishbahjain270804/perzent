@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BRAND } from '@perzent/shared-types';
 import type { RemoteMaintenance } from '../services/RemoteConfigService';
 
 /**
@@ -61,7 +62,9 @@ function StatusLayout({
           </View>
         ) : null}
       </View>
-      <Image source={require('../../assets/developed-by-jsp-coders.png')} style={styles.branding} resizeMode="contain" accessibilityLabel="Developed by JSP Coders" />
+      <TouchableOpacity style={styles.branding} onPress={() => Linking.openURL(BRAND.developerUrl).catch(() => undefined)} accessibilityLabel="Developed by JSP Coders">
+        <Image source={require('../../assets/developed-by-jsp-coders.png')} style={styles.brandingImage} resizeMode="contain" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -198,6 +201,7 @@ const styles = StyleSheet.create({
   supportLabel: { fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 },
   supportLink: { fontSize: 13, color: '#16A34A', fontWeight: '600' },
   branding: { position: 'absolute', bottom: 28, width: 180, height: 64 },
+  brandingImage: { width: 180, height: 64 },
   banner: { marginHorizontal: 16, marginTop: 8, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1 },
   bannerText: { fontSize: 12, fontWeight: '600', lineHeight: 17 },
 });

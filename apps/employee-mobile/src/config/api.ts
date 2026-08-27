@@ -1,10 +1,10 @@
 export const API_CONFIG = {
   // EXPO_PUBLIC_API_URL is inlined at bundle time by Expo; the production host is the fallback.
-  BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'https://perzent.vercel.app',
+  BASE_URL: process.env.EXPO_PUBLIC_API_URL || 'https://perzent.jspcoders.app',
   DOMAINS: {
-    API_BACKEND: 'https://perzent.vercel.app',
-    EMPLOYEE_APP: 'https://perzent.vercel.app',
-    OWNER_ADMIN: 'https://perzent.vercel.app/dashboard',
+    API_BACKEND: 'https://perzent.jspcoders.app',
+    EMPLOYEE_APP: 'https://perzent.jspcoders.app',
+    OWNER_ADMIN: 'https://perzent.jspcoders.app/dashboard',
   },
   ENDPOINTS: {
     AUTH_LOGIN: '/api/auth',

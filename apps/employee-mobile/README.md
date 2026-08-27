@@ -25,7 +25,7 @@ of that. Plain `expo prebuild` is also discouraged; make native changes by editi
 
 ## Configuration
 
-- `.env` - `EXPO_PUBLIC_API_URL` (defaults to `https://perzent.vercel.app` when unset).
+- `.env` - `EXPO_PUBLIC_API_URL` (defaults to `https://perzent.jspcoders.app` when unset).
 - `android/keystore.properties` - release signing (git-ignored). See `RELEASE.md`.
 
 ## Release

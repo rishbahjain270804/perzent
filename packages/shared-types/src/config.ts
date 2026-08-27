@@ -28,3 +28,17 @@ export const SYSTEM_CONFIG = {
   MAX_REALISTIC_SPEED_KMH: 180,
   ALLOW_MOCK_LOCATIONS: false,
 } as const;
+
+/** Product / developer identity used by the app and the portal (single place to change). */
+export const BRAND = {
+  productName: 'Perzent',
+  developerName: 'JSP Coders',
+  developerUrl: 'https://jspcoders.app',
+  supportEmail: 'jspcoders@gmail.com',
+  webUrl: 'https://perzent.jspcoders.app',
+  supportPath: '/support',
+  faqPath: '/faq',
+  privacyPath: '/privacy',
+  termsPath: '/terms',
+  accountDeletionPath: '/account-deletion',
+} as const;

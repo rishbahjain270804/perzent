@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { BRAND } from '@perzent/shared-types';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — Perzent',
@@ -8,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 const EFFECTIVE_DATE = '27 August 2026';
-const SUPPORT_EMAIL = 'support@perzent.app';
+const SUPPORT_EMAIL = BRAND.supportEmail;
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
@@ -187,6 +188,7 @@ export default function PrivacyPolicyPage() {
           <ul className="list-disc pl-5 space-y-1">
             <li><strong>To view your data</strong>, ask your employer — owners and managers can show you your attendance and route history in the portal.</li>
             <li><strong>To correct or delete your data</strong>, or to close your account, ask your employer. They can terminate the account, reset the device binding, and adjust retention.</li>
+            <li>To delete your account or data, follow the steps on the <Link href="/account-deletion" className="text-[#16A34A] underline">account deletion page</Link>.</li>
             <li>If you cannot reach your employer, or believe the service is being misused, contact us at <a href={`mailto:${SUPPORT_EMAIL}`} className="text-[#16A34A] underline">{SUPPORT_EMAIL}</a> and we will assist or forward your request.</li>
           </ul>
           <p>You can stop location collection at any time by checking out, or by revoking the location permission in Android settings.</p>
