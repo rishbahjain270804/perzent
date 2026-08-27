@@ -19,6 +19,7 @@ import { AutoUpdateService } from '../services/AutoUpdateService';
 import { WaypointQueueService } from '../services/WaypointQueueService';
 import { BackgroundTrackingService } from '../services/BackgroundTrackingService';
 import { SessionEvents } from '../services/SessionEvents';
+import { DirectAccess } from '../services/DirectAccess';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
@@ -177,10 +178,7 @@ export default function DutyDashboardScreen({
         const due = sinceLastPatch >= (shiftOpen ? ON_DUTY_TELEMETRY_INTERVAL_MS : OFF_DUTY_TELEMETRY_INTERVAL_MS);
         if (options.forceUpload || due) {
           lastTelemetryPatchRef.current = Date.now();
-          await EmployeeApi.attendance(session, 'PATCH', {
-            telemetry: next.telemetry,
-            device: deviceInfo,
-          }).catch(() => undefined);
+          await EmployeeApi.telemetry(session, next.telemetry, deviceInfo).catch(() => undefined);
         }
         return next;
       } catch {
@@ -219,7 +217,7 @@ export default function DutyDashboardScreen({
         if (!running) {
           const permission = await DeviceIntegrityService.getLocationPermissionState();
           if (permission.foreground) {
-            await BackgroundTrackingService.start(session.token, userId, punchInAt ?? serverNow());
+            await BackgroundTrackingService.start(session.token, userId, punchInAt ?? serverNow(), DirectAccess.config(session));
           }
         }
       } else if (running) {
@@ -231,7 +229,7 @@ export default function DutyDashboardScreen({
 
   const syncAttendanceState = useCallback(async () => {
     try {
-      const data = await EmployeeApi.attendance(session);
+      const data = await EmployeeApi.shiftState(session);
       const applied = applyAttendance(data);
       await reconcileTracking(applied.status, applied.punchInAt);
     } catch (error: any) {
@@ -376,10 +374,7 @@ export default function DutyDashboardScreen({
     const next = await DeviceIntegrityService.inspect({ acquirePosition: true });
     setReadiness(next);
     lastTelemetryPatchRef.current = Date.now();
-    await EmployeeApi.attendance(session, 'PATCH', {
-      telemetry: next.telemetry,
-      device: deviceInfo,
-    }).catch(() => undefined);
+    await EmployeeApi.telemetry(session, next.telemetry, deviceInfo).catch(() => undefined);
     if (!next.ready || !next.position) {
       const message = next.blockers.map((item) => `• ${item.message}`).join('\n');
       Alert.alert('Check-in blocked', message || 'A verified GPS position is required.');
@@ -410,7 +405,7 @@ export default function DutyDashboardScreen({
       setLastWaypointTime(Date.now());
       setAlreadyCompletedToday(false);
       setShiftStatus(toShiftStatus(result?.status) === 'CHECKED_OUT' ? 'CHECKED_IN' : toShiftStatus(result?.status));
-      await BackgroundTrackingService.start(session.token, userId, punchTime);
+      await BackgroundTrackingService.start(session.token, userId, punchTime, DirectAccess.config(session));
       Alert.alert(
         'Shift started',
         'Your location and attendance were verified. Live location sharing stays on until you start a break or check out.'
@@ -512,7 +507,7 @@ export default function DutyDashboardScreen({
       setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
       setShiftStatus('CHECKED_IN');
-      await BackgroundTrackingService.start(session.token, userId, punchTime);
+      await BackgroundTrackingService.start(session.token, userId, punchTime, DirectAccess.config(session));
     } catch (error) {
       showActionError('Resume failed', error);
     } finally {

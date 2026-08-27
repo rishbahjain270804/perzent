@@ -19,7 +19,7 @@ import {
 } from '@/components';
 import { freshnessOf, freshnessLabel, secondsSincePing, isOnShift, type LiveMember } from '@/components/liveStatus';
 
-const POLL_MS = 10_000;
+const POLL_MS = 30_000;
 
 export default function DashboardOverviewPage() {
   const { session } = useSession();

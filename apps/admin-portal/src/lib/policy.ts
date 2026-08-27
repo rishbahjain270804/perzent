@@ -132,11 +132,20 @@ export type MaintenanceSummary = {
   breaks_ended: number;
   sessions_purged: number;
   waypoints_purged: number;
+  shifts_compacted: number;
+  points_compacted: number;
 };
 
-/** Daily housekeeping used by the cron endpoint. */
+/** Daily housekeeping used by the cron endpoint (pg_cron covers policies/retention more frequently). */
 export async function runMaintenance(): Promise<MaintenanceSummary> {
-  const summary: MaintenanceSummary = { companies: 0, auto_checked_out: 0, breaks_ended: 0, sessions_purged: 0, waypoints_purged: 0 };
+  const summary: MaintenanceSummary = {
+    companies: 0, auto_checked_out: 0, breaks_ended: 0, sessions_purged: 0, waypoints_purged: 0, shifts_compacted: 0, points_compacted: 0,
+  };
+  // Compact closed shifts into RouteArchive first so retention deletes as little raw data as possible.
+  const { compactClosedShifts } = await import('./route-archive');
+  const compaction = await compactClosedShifts({ minAgeHours: 3, limit: 400 });
+  summary.shifts_compacted = compaction.compacted;
+  summary.points_compacted = compaction.points_removed;
   const companies = await prisma.company.findMany({ select: policySelect });
 
   for (const company of companies) {

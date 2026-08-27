@@ -13,7 +13,10 @@ class PerzentTrackingModule(
     override fun getName(): String = "PerzentBackgroundTracking"
 
     @ReactMethod
-    fun startTracking(token: String?, userId: String?, apiBaseUrl: String?, punchInEpochMs: Double, promise: Promise) {
+    fun startTracking(
+        token: String?, userId: String?, apiBaseUrl: String?, punchInEpochMs: Double,
+        directUrl: String?, directAnonKey: String?, directToken: String?, promise: Promise
+    ) {
         try {
             val safeToken = token ?: ""
             val safeUserId = userId ?: ""
@@ -23,7 +26,11 @@ class PerzentTrackingModule(
                 apiBaseUrl
             }
             val punchIn = if (punchInEpochMs.isFinite() && punchInEpochMs > 0) punchInEpochMs.toLong() else System.currentTimeMillis()
-            PerzentLocationService.startService(reactContext, safeToken, safeUserId, safeApiBase, punchIn)
+            val clean = { v: String? -> if (v.isNullOrBlank() || v == "undefined" || v == "null") "" else v }
+            PerzentLocationService.startService(
+                reactContext, safeToken, safeUserId, safeApiBase, punchIn,
+                clean(directUrl), clean(directAnonKey), clean(directToken)
+            )
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("TRACKING_START_ERROR", "Failed to start background tracking service", e)

@@ -17,7 +17,8 @@ import {
   Users,
 } from 'lucide-react';
 import type { DailyRoutePlayback } from '@perzent/shared-types';
-import { apiFetch, errorMessage, isAbortError, formatTime, todayInTimezone, isValidYmd } from '@/lib/client';
+import { apiFetch, errorMessage, isAbortError, formatTime, todayInTimezone, isValidYmd, type SessionInfo } from '@/lib/client';
+import { directConfigFromSession, directRpc, type DirectConfig, type LivePositionRow } from '@/lib/direct';
 import { useSession } from '@/components/useSession';
 import {
   freshnessOf,
@@ -26,12 +27,15 @@ import {
   speedKmh,
   isOnShift,
   SHIFT_META,
+  DISCONNECTED_AFTER_SECONDS,
   type LiveMember,
   type Freshness,
 } from '@/components/liveStatus';
 
 type MapMode = 'LIVE' | 'DAY';
 type Leaflet = typeof import('leaflet');
+/** With direct access the API roster is only re-read this often; positions come from the RPC every poll. */
+const ROSTER_REFRESH_MS = 60_000;
 
 interface MarkerState {
   marker: Marker;
@@ -46,7 +50,7 @@ interface MarkerState {
   livePolyline?: Polyline;
 }
 
-const LIVE_POLL_MS = 3_000;
+const LIVE_POLL_MS = 5_000;
 const DAY_POLL_MS = 15_000;
 const MAX_TRAIL_POINT_MARKERS = 400;
 
@@ -219,6 +223,69 @@ function LiveMapInner() {
     return () => query.removeEventListener('change', update);
   }, []);
 
+  /* Database-direct positions (Supabase RPC) when the session carries a direct-access token. The
+     full roster (designation, device, telemetry, tamper reasons) still comes from /api/live-team,
+     refreshed once a minute; positions/freshness come from the cheap RPC every poll. */
+  const directRef = useRef<DirectConfig | null>(null);
+  const rosterRef = useRef<Map<string, LiveMember>>(new Map());
+  const rosterAtRef = useRef(0);
+  useEffect(() => {
+    directRef.current = directConfigFromSession(session as (SessionInfo & { supabase?: DirectConfig | null }) | null);
+  }, [session]);
+
+  const mergePositions = useCallback((rows: LivePositionRow[], nowTs: number): LiveMember[] => {
+    return rows.map((row) => {
+      const base = rosterRef.current.get(row.user_id);
+      const onShift = row.shift_status === 'CHECKED_IN' || row.shift_status === 'ON_BREAK';
+      const lastPoint = row.last_point_at ? Date.parse(row.last_point_at) : NaN;
+      const lastSeen = row.last_seen_at ? Date.parse(row.last_seen_at) : NaN;
+      const presence = Math.max(Number.isFinite(lastPoint) ? lastPoint : 0, onShift && Number.isFinite(lastSeen) ? lastSeen : 0);
+      const seconds = presence > 0 ? Math.max(0, Math.floor((nowTs - presence) / 1000)) : null;
+      const disconnected = row.shift_status === 'CHECKED_IN' && seconds !== null && seconds > DISCONNECTED_AFTER_SECONDS;
+      const tamper = disconnected
+        ? `No GPS ping for over ${Math.round(DISCONNECTED_AFTER_SECONDS / 60)} minutes (location or internet off)`
+        : row.mock_location
+          ? 'Mock/fake location app detected'
+          : !row.gps_enabled && row.shift_status === 'CHECKED_IN'
+            ? 'Location services turned off'
+            : base?.tamper_reason ?? null;
+      const hasLocation = row.latitude !== null && row.longitude !== null;
+      return {
+        ...(base ?? {
+          user_id: row.user_id,
+          full_name: row.full_name,
+          designation: '',
+          department_name: undefined,
+          dwell_minutes: 0,
+          gps_enabled: row.gps_enabled,
+        }),
+        user_id: row.user_id,
+        full_name: row.full_name,
+        shift_status: row.shift_status,
+        punch_in_time: row.punch_in_time,
+        punch_out_time: base?.punch_out_time ?? null,
+        current_location: hasLocation
+          ? {
+              latitude: row.latitude as number,
+              longitude: row.longitude as number,
+              accuracy: row.accuracy,
+              speed: row.speed,
+              heading: row.heading,
+              address_name: `${(row.latitude as number).toFixed(4)}, ${(row.longitude as number).toFixed(4)}`,
+              last_ping_at: row.last_point_at || row.punch_in_time || new Date(nowTs).toISOString(),
+            }
+          : base?.current_location,
+        is_moving: row.speed > 0.8,
+        battery_level: row.battery_level ?? base?.battery_level,
+        gps_enabled: row.gps_enabled && !disconnected,
+        is_gps_disconnected: disconnected,
+        seconds_since_last_ping: seconds,
+        has_tamper_alert: Boolean(tamper),
+        tamper_reason: tamper,
+      } as LiveMember;
+    });
+  }, []);
+
   /* Polling: in-flight guard, AbortController, pauses while the tab is hidden. */
   const fetchLiveTeam = useCallback(async (manual = false) => {
     if (inFlightRef.current) return;
@@ -228,7 +295,22 @@ function LiveMapInner() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const result = await apiFetch<LiveMember[]>('/api/live-team', { signal: controller.signal });
+      let result: LiveMember[] | null = null;
+      if (directRef.current) {
+        const nowTs = Date.now();
+        if (rosterRef.current.size === 0 || nowTs - rosterAtRef.current > ROSTER_REFRESH_MS) {
+          const roster = await apiFetch<LiveMember[]>('/api/live-team', { signal: controller.signal });
+          if (Array.isArray(roster)) {
+            rosterRef.current = new Map(roster.map((member) => [member.user_id, member]));
+            rosterAtRef.current = nowTs;
+          }
+        }
+        const rows = await directRpc<LivePositionRow[]>('live_team_positions', {}, controller.signal);
+        if (Array.isArray(rows)) result = mergePositions(rows, nowTs);
+      }
+      if (!result) {
+        result = await apiFetch<LiveMember[]>('/api/live-team', { signal: controller.signal });
+      }
       if (!Array.isArray(result)) throw new Error('Unexpected live-team response');
       setTeam(result);
       setLastRefreshed(new Date());
@@ -242,7 +324,7 @@ function LiveMapInner() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [mergePositions]);
 
   useEffect(() => {
     fetchLiveTeam(true);

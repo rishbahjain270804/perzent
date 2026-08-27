@@ -4,6 +4,7 @@ import { calculateTrailDistanceMeters, detectStops } from '@perzent/location-eng
 import { DATE_ONLY_REGEX, SYSTEM_CONFIG, type DailyRoutePlayback } from '@perzent/shared-types';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
 import { getCompanyPolicy } from '@/lib/policy';
+import { playbackFromArchive } from '@/lib/route-archive';
 import { addDays, localDateString, workDateFromString, zonedTimeToUtc } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +47,13 @@ export async function GET(request: Request) {
     });
 
     let points = attendance?.waypoints ?? [];
+
+    // Closed shifts are compacted nightly into RouteArchive; serve those from the archive.
+    if (attendance && points.length === 0) {
+      const archive = await prisma.routeArchive.findUnique({ where: { attendance_id: attendance.id } });
+      if (archive) return NextResponse.json(playbackFromArchive(archive, user, dateStr));
+    }
+
     if (points.length === 0) {
       points = await prisma.locationWaypoint.findMany({
         where: { user_id: user.id, recorded_at: { gte: dayStart, lt: dayEnd } },

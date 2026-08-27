@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '../config/api';
 import { SessionEvents } from './SessionEvents';
+import { DirectAccess } from './DirectAccess';
 
 const QUEUE_STORAGE_KEY = 'perzent_offline_waypoints_queue_v1';
 const MAX_QUEUE_SIZE = 1000;
@@ -109,6 +110,41 @@ export class WaypointQueueService {
       // the first `batch.length` entries after success is always the sent batch.
       while (queue.length > 0) {
         const batch = queue.slice(0, MAX_BATCH_SIZE);
+
+        // Preferred path: database-direct RPC (no API function invocation). Falls through to the API
+        // route when the backend has not issued a direct-access token.
+        const direct = await DirectAccess.rpc<{ code?: string; ingested?: number }>(session, 'ingest_waypoints', {
+          p_points: { waypoints: batch },
+        });
+        if (direct) {
+          if (direct.ok) {
+            if (direct.data?.code === 'NO_ACTIVE_SHIFT') {
+              dropped += queue.length;
+              queue.splice(0, queue.length);
+              await this.persist();
+              return { outcome: 'NO_ACTIVE_SHIFT', sent, dropped };
+            }
+            queue.splice(0, batch.length);
+            sent += batch.length;
+            await this.persist();
+            this.resetBackoff();
+            continue;
+          }
+          if (direct.status === 401 || direct.status === 403) {
+            queue.splice(0, queue.length);
+            await this.persist();
+            return { outcome: 'AUTH_INVALID', sent, dropped };
+          }
+          if (direct.status >= 400 && direct.status < 500) {
+            queue.splice(0, batch.length);
+            dropped += batch.length;
+            await this.persist();
+            continue;
+          }
+          this.scheduleBackoff();
+          return { outcome: 'RETRY_LATER', sent, dropped };
+        }
+
         let response: Response;
         try {
           response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WAYPOINTS}`, {

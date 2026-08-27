@@ -14,6 +14,7 @@ import {
   setSessionCookie,
 } from '@/lib/auth';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
+import { supabaseDirectConfig } from '@/lib/supabase-token';
 import { isValidTimeZone } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,9 @@ const userPayload = (user: any) => ({
   company_id: user.company_id,
   company_name: user.company?.name,
   company: user.company,
+  // Database-direct access (GPS ingestion, heartbeat, shift state, live positions) — null until
+  // SUPABASE_JWT_SECRET is configured; clients then fall back to the API routes.
+  supabase: supabaseDirectConfig({ id: user.id, company_id: user.company_id, role: user.role }),
   role: user.role,
   full_name: user.full_name,
   email: user.email,

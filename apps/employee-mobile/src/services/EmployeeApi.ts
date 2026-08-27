@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 import { API_CONFIG } from '../config/api';
 import { SessionEvents } from './SessionEvents';
+import { DirectAccess } from './DirectAccess';
 
 export type AttendanceErrorCode =
   | 'NO_ACTIVE_SHIFT'
@@ -160,6 +161,23 @@ export class EmployeeApi {
 
   static attendance(session: any, method: 'GET' | 'POST' | 'PATCH' = 'GET', body?: any) {
     return request(session, API_CONFIG.ENDPOINTS.MOBILE_ATTENDANCE, method, body, 'Attendance request failed');
+  }
+
+  /** Shift state for the duty screen — database-direct when available, API otherwise. */
+  static async shiftState(session: any) {
+    const direct = await DirectAccess.rpc(session, 'my_shift_state', {});
+    if (direct?.ok && direct.data) return direct.data;
+    if (direct && !direct.ok && (direct.status === 401 || direct.status === 403)) {
+      throw new ApiError('Session expired, please sign in again', 401);
+    }
+    return this.attendance(session);
+  }
+
+  /** Device telemetry / presence heartbeat — database-direct when available, API otherwise. */
+  static async telemetry(session: any, telemetry: unknown, device?: unknown) {
+    const direct = await DirectAccess.rpc(session, 'device_heartbeat', { p_telemetry: telemetry ?? {}, p_device: device ?? {} });
+    if (direct?.ok) return direct.data;
+    return this.attendance(session, 'PATCH', { telemetry, device });
   }
 
   static async currentPosition(): Promise<DevicePosition> {

@@ -221,6 +221,7 @@ model AttendanceRecord {
   stops                    LocationStop[]
   waypoints                LocationWaypoint[]
   tamper_logs              TamperLog[]
+  route_archive            RouteArchive?
 
   @@unique([user_id, work_date])
   @@index([work_date, status])
@@ -277,6 +278,33 @@ model LocationWaypoint {
 
   @@index([user_id, recorded_at])
   @@index([attendance_id, recorded_at])
+}
+
+/// Compact per-shift route storage. Closed shifts are compacted nightly: the raw LocationWaypoint rows
+/// (~340 B each) are encoded into one row (~5 B per point) and deleted. Routes for past days are read
+/// from here; today's open shifts still read LocationWaypoint.
+model RouteArchive {
+  attendance_id  String   @id
+  user_id        String
+  company_id     String
+  work_date      DateTime @db.Date
+  point_count    Int
+  distance_m     Int      @default(0)
+  first_at       DateTime
+  last_at        DateTime
+  /// Google encoded polyline, precision 1e-6
+  encoded_points String
+  /// Varint-encoded second deltas between consecutive points (base64)
+  encoded_times  String
+  /// Detected dwell stops and break intervals, as served by /api/routes
+  stops          Json
+  breaks         Json
+  created_at     DateTime @default(now())
+
+  attendance     AttendanceRecord @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, work_date])
+  @@index([company_id, work_date])
 }
 
 model LeaveRequest {

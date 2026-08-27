@@ -13,9 +13,19 @@ export type TrackingState = {
   last_fix_epoch: number;
 };
 
+export type DirectAccessConfig = { url: string; anon_key: string; token: string } | null | undefined;
+
 const nativeModule = NativeModules.PerzentBackgroundTracking as
   | {
-      startTracking: (token: string, userId: string, apiBaseUrl: string, punchInEpochMs: number) => Promise<boolean>;
+      startTracking: (
+        token: string,
+        userId: string,
+        apiBaseUrl: string,
+        punchInEpochMs: number,
+        directUrl: string,
+        directAnonKey: string,
+        directToken: string
+      ) => Promise<boolean>;
       stopTracking: () => Promise<boolean>;
       isTrackingActive: () => Promise<boolean>;
       getTrackingState: () => Promise<Partial<TrackingState>>;
@@ -36,14 +46,17 @@ export class BackgroundTrackingService {
    * Starts the native Android foreground location service. The service owns the single
    * persistent "on duty" notification and computes the shift timer from `punchInEpochMs`.
    */
-  static async start(token?: string, userId?: string, punchInEpochMs?: number): Promise<void> {
+  static async start(token?: string, userId?: string, punchInEpochMs?: number, direct?: DirectAccessConfig): Promise<void> {
     if (Platform.OS !== 'android' || !nativeModule) return;
     try {
       await nativeModule.startTracking(
         token || '',
         userId || '',
         API_CONFIG.BASE_URL || 'https://perzent.vercel.app',
-        Number.isFinite(punchInEpochMs) ? (punchInEpochMs as number) : Date.now()
+        Number.isFinite(punchInEpochMs) ? (punchInEpochMs as number) : Date.now(),
+        direct?.url || '',
+        direct?.anon_key || '',
+        direct?.token || ''
       );
     } catch (err) {
       console.warn('[BackgroundTrackingService] Failed to start native tracking service:', err);

@@ -79,6 +79,10 @@ class PerzentLocationService : Service() {
         const val KEY_AUTH_INVALID = "auth_invalid"
         const val KEY_SHIFT_ENDED_REMOTELY = "shift_ended_remotely"
         const val KEY_PERMISSION_REVOKED = "permission_revoked"
+        // Database-direct access (Supabase PostgREST RPC); empty when the backend has not issued it.
+        const val KEY_DIRECT_URL = "direct_url"
+        const val KEY_DIRECT_ANON = "direct_anon_key"
+        const val KEY_DIRECT_TOKEN = "direct_token"
         const val DEFAULT_API_BASE = "https://perzent.vercel.app"
 
         const val MAX_OFFLINE_POINTS = 3000
@@ -121,6 +125,9 @@ class PerzentLocationService : Service() {
             userId: String,
             apiBase: String = DEFAULT_API_BASE,
             punchInEpochMs: Long = System.currentTimeMillis(),
+            directUrl: String = "",
+            directAnonKey: String = "",
+            directToken: String = "",
         ) {
             stopRequested = false
             synchronized(queueLock) {
@@ -128,6 +135,9 @@ class PerzentLocationService : Service() {
                     .putString(KEY_TOKEN, token)
                     .putString(KEY_USER_ID, userId)
                     .putString(KEY_API_BASE, apiBase)
+                    .putString(KEY_DIRECT_URL, directUrl)
+                    .putString(KEY_DIRECT_ANON, directAnonKey)
+                    .putString(KEY_DIRECT_TOKEN, directToken)
                     .putLong(KEY_PUNCH_IN_EPOCH, punchInEpochMs)
                     .putBoolean(KEY_TRACKING_ACTIVE, true)
                     .putBoolean(KEY_AUTH_INVALID, false)
@@ -160,6 +170,7 @@ class PerzentLocationService : Service() {
                     .remove(KEY_TOKEN)
                     .remove(KEY_USER_ID)
                     .remove(KEY_PUNCH_IN_EPOCH)
+                    .remove(KEY_DIRECT_TOKEN)
                     .apply()
             } catch (e: Exception) {
                 Log.w(TAG, "stopService: prefs update failed: ${e.message}")
@@ -225,6 +236,9 @@ class PerzentLocationService : Service() {
     @Volatile private var userId: String = ""
     @Volatile private var apiBase: String = DEFAULT_API_BASE
     @Volatile private var punchInEpochMs: Long = 0L
+    @Volatile private var directUrl: String = ""
+    @Volatile private var directAnon: String = ""
+    @Volatile private var directToken: String = ""
 
     // Main-thread state
     private var lastAcceptedLocation: Location? = null
@@ -285,6 +299,9 @@ class PerzentLocationService : Service() {
         userId = savedUserId
         apiBase = p.getString(KEY_API_BASE, DEFAULT_API_BASE) ?: DEFAULT_API_BASE
         punchInEpochMs = p.getLong(KEY_PUNCH_IN_EPOCH, System.currentTimeMillis())
+        directUrl = p.getString(KEY_DIRECT_URL, "") ?: ""
+        directAnon = p.getString(KEY_DIRECT_ANON, "") ?: ""
+        directToken = p.getString(KEY_DIRECT_TOKEN, "") ?: ""
 
         if (!DeviceStatus.hasFineLocationPermission(this)) {
             Log.w(TAG, "Location permission not granted - cannot track.")
@@ -709,9 +726,51 @@ class PerzentLocationService : Service() {
      * 2xx -> remove batch; 400 -> drop batch; 401 -> auth invalid; 409 -> shift ended remotely;
      * 5xx / IOException -> keep and retry with exponential backoff (5 s .. 2 min).
      */
+    private enum class Refresh { OK, AUTH_INVALID, FAILED }
+
+    /**
+     * Upload thread. Re-fetches the session from the API, which mints a fresh database-direct token.
+     * A 401 from the API means the whole session is dead.
+     */
+    private fun refreshDirectToken(): Refresh {
+        if (token.isEmpty()) return Refresh.AUTH_INVALID
+        val request = Request.Builder()
+            .url("$apiBase/api/auth")
+            .get()
+            .addHeader("Authorization", "Bearer $token")
+            .build()
+        return try {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.code == 401) return Refresh.AUTH_INVALID
+                if (!response.isSuccessful) return Refresh.FAILED
+                val json = JSONObject(response.body?.string() ?: return Refresh.FAILED)
+                val direct = json.optJSONObject("supabase") ?: return Refresh.FAILED
+                val url = direct.optString("url"); val anon = direct.optString("anon_key"); val fresh = direct.optString("token")
+                if (url.isEmpty() || fresh.isEmpty()) return Refresh.FAILED
+                directUrl = url; directAnon = anon; directToken = fresh
+                prefs(this).edit().putString(KEY_DIRECT_URL, url).putString(KEY_DIRECT_ANON, anon).putString(KEY_DIRECT_TOKEN, fresh).apply()
+                Refresh.OK
+            }
+        } catch (e: Exception) {
+            Refresh.FAILED
+        }
+    }
+
+    private fun useDirect(): Boolean = directUrl.isNotEmpty() && directToken.isNotEmpty()
+
+    private fun directRequest(fn: String, args: JSONObject): Request =
+        Request.Builder()
+            .url("$directUrl/rest/v1/rpc/$fn")
+            .post(args.toString().toRequestBody(jsonMediaType))
+            .addHeader("apikey", directAnon)
+            .addHeader("Authorization", "Bearer $directToken")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
     private fun flushQueue(token: String, apiBase: String, ignoreBackoff: Boolean = false) {
         if (token.isEmpty()) return
         if (!ignoreBackoff && System.currentTimeMillis() < retryNotBeforeMs) return
+        var refreshedOnce = false
 
         while (true) {
             val queue = readQueue()
@@ -719,21 +778,41 @@ class PerzentLocationService : Service() {
             val batch = JSONArray()
             for (i in 0 until minOf(queue.length(), MAX_BATCH_SIZE)) batch.put(queue.get(i))
 
-            val body = JSONObject().put("waypoints", batch).toString().toRequestBody(jsonMediaType)
-            val request = Request.Builder()
-                .url("$apiBase/api/mobile/waypoints")
-                .post(body)
-                .addHeader("Authorization", "Bearer $token")
-                .addHeader("Content-Type", "application/json")
-                .build()
+            val direct = useDirect()
+            val request = if (direct) {
+                directRequest("ingest_waypoints", JSONObject().put("p_points", JSONObject().put("waypoints", batch)))
+            } else {
+                Request.Builder()
+                    .url("$apiBase/api/mobile/waypoints")
+                    .post(JSONObject().put("waypoints", batch).toString().toRequestBody(jsonMediaType))
+                    .addHeader("Authorization", "Bearer $token")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+            }
 
             try {
                 httpClient.newCall(request).execute().use { response ->
                     when {
                         response.isSuccessful -> {
+                            if (direct) {
+                                val code = try { JSONObject(response.body?.string() ?: "{}").optString("code") } catch (e: Exception) { "" }
+                                if (code == "NO_ACTIVE_SHIFT") {
+                                    onShiftEndedRemotely()
+                                    return
+                                }
+                            }
                             removeFromQueueHead(batch.length())
                             resetBackoff()
-                            Log.d(TAG, "Uploaded ${batch.length()} waypoint(s)")
+                            Log.d(TAG, "Uploaded ${batch.length()} waypoint(s)${if (direct) " (direct)" else ""}")
+                        }
+                        direct && (response.code == 401 || response.code == 403) -> {
+                            if (refreshedOnce) { scheduleBackoff(); return }
+                            refreshedOnce = true
+                            when (refreshDirectToken()) {
+                                Refresh.OK -> { /* loop retries the same batch with the new token */ }
+                                Refresh.AUTH_INVALID -> { onAuthInvalid(); return }
+                                Refresh.FAILED -> { scheduleBackoff(); return }
+                            }
                         }
                         response.code == 401 -> {
                             onAuthInvalid()
@@ -774,6 +853,7 @@ class PerzentLocationService : Service() {
                 .remove(KEY_TOKEN)
                 .remove(KEY_USER_ID)
                 .remove(KEY_PUNCH_IN_EPOCH)
+                .remove(KEY_DIRECT_TOKEN)
                 .putString(KEY_OFFLINE_WAYPOINTS, "[]")
                 .commit()
         }
@@ -823,21 +903,25 @@ class PerzentLocationService : Service() {
             put("device_model", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
             put("os_version", "Android ${Build.VERSION.RELEASE}")
         }
-        val body = JSONObject().apply {
-            put("telemetry", telemetry)
-            put("device", device)
-        }.toString().toRequestBody(jsonMediaType)
-
-        val request = Request.Builder()
-            .url("$apiBase/api/mobile/attendance")
-            .patch(body)
-            .addHeader("Authorization", "Bearer $token")
-            .addHeader("Content-Type", "application/json")
-            .build()
+        val direct = useDirect()
+        val request = if (direct) {
+            directRequest("device_heartbeat", JSONObject().put("p_telemetry", telemetry).put("p_device", device))
+        } else {
+            Request.Builder()
+                .url("$apiBase/api/mobile/attendance")
+                .patch(JSONObject().put("telemetry", telemetry).put("device", device).toString().toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "application/json")
+                .build()
+        }
 
         try {
             httpClient.newCall(request).execute().use { response ->
-                if (response.code == 401) onAuthInvalid()
+                if (direct && (response.code == 401 || response.code == 403)) {
+                    if (refreshDirectToken() == Refresh.AUTH_INVALID) onAuthInvalid()
+                } else if (response.code == 401) {
+                    onAuthInvalid()
+                }
             }
         } catch (e: IOException) {
             Log.w(TAG, "Telemetry deferred: ${e.message}")
