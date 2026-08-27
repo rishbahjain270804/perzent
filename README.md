@@ -63,7 +63,7 @@ Production applies migrations with `pnpm db:migrate` (`prisma migrate deploy`). 
 
 ## Deployment (web + API)
 
-Vercel project → root of this repo. Required environment variables:
+Vercel project → root of this repo (`next` is kept as a root devDependency only so Vercel detects the framework from the monorepo root — do not remove it). Required environment variables:
 
 - `DATABASE_URL` (pooled, `pgbouncer=true&connection_limit=1`), `DIRECT_URL`
 - `CRON_SECRET` — protects `/api/cron/policies` (Vercel Cron, daily at 18:45 UTC / 00:15 IST, see `vercel.json`)
