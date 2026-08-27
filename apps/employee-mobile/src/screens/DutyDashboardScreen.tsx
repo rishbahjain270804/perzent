@@ -256,6 +256,8 @@ export default function DutyDashboardScreen({
   useEffect(() => {
     let mounted = true;
     (async () => {
+      // Sessions created before direct access was enabled have no token yet: fetch one once.
+      if (!DirectAccess.enabled(session)) await DirectAccess.refresh(session).catch(() => undefined);
       await syncAttendanceState();
       await refreshReadiness({ forceUpload: true });
       if (isManager) loadManagerTeam();

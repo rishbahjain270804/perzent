@@ -28,13 +28,17 @@ export function signSupabaseJwt(payload: Record<string, unknown>, ttlSeconds: nu
   return `${header}.${body}.${signature}`;
 }
 
-export const supabaseDirectEnabled = () => Boolean(SECRET && SUPABASE_URL);
+/**
+ * The Supabase API gateway only accepts the project's registered anon/publishable key as `apikey`
+ * (Project Settings → API Keys). It is public by design and grants nothing by itself (RLS deny-all);
+ * the per-user Bearer token is what authorises the RPC calls.
+ */
+const ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-let cachedAnonKey: string | null = null;
-/** A role=anon JWT acts as the PostgREST `apikey`; it grants nothing by itself (RLS deny-all). */
+export const supabaseDirectEnabled = () => Boolean(SECRET && SUPABASE_URL && ANON_KEY);
+
 function anonKey() {
-  if (!cachedAnonKey) cachedAnonKey = signSupabaseJwt({ role: 'anon', ref: PROJECT_REF }, 10 * 365 * 24 * 3600);
-  return cachedAnonKey;
+  return ANON_KEY;
 }
 
 export type SupabaseDirectConfig = {
