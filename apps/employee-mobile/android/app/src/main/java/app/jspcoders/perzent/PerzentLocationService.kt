@@ -168,12 +168,18 @@ class PerzentLocationService : Service() {
             }
         }
 
-        fun isTracking(context: Context): Boolean = prefs(context).getBoolean(KEY_TRACKING_ACTIVE, false)
+        /**
+         * True only while the service instance is alive in this process. The prefs flag alone means
+         * "a shift is open and tracking is wanted" and survives reboots / process death, which made
+         * the app believe tracking was running after a reboot when it was not.
+         */
+        fun isTracking(context: Context): Boolean =
+            prefs(context).getBoolean(KEY_TRACKING_ACTIVE, false) && instance != null
 
         fun getState(context: Context): TrackingState {
             val p = prefs(context)
             return TrackingState(
-                trackingActive = p.getBoolean(KEY_TRACKING_ACTIVE, false),
+                trackingActive = p.getBoolean(KEY_TRACKING_ACTIVE, false) && instance != null,
                 authInvalid = p.getBoolean(KEY_AUTH_INVALID, false),
                 shiftEndedRemotely = p.getBoolean(KEY_SHIFT_ENDED_REMOTELY, false),
                 permissionRevoked = p.getBoolean(KEY_PERMISSION_REVOKED, false),

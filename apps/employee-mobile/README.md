@@ -34,14 +34,14 @@ See [`RELEASE.md`](./RELEASE.md) for the Play Store checklist.
 
 ## Adding React Native libraries with native code
 
-Expo's `react-native-config` autolinking does **not** detect some community libraries in this pnpm
-workspace (observed with `react-native-safe-area-context`: the build succeeded but the app crashed
-with `No ViewManager found for class RNCSafeAreaProvider`). Link such libraries manually:
+Autolinking (Expo `react-native-config`) only sees libraries that are listed in **this** package.json.
+A failed `pnpm add` (e.g. aborted postinstall) can leave the package in node_modules and the lockfile
+but not in package.json — the build then compiles fine and the app crashes on launch with
+`No ViewManager found for class ...`. After adding a native library:
 
-1. `android/settings.gradle` — `include ':<lib>'` + `project(':<lib>').projectDir = .../node_modules/<lib>/android`
-2. `android/app/build.gradle` — `implementation project(':<lib>')`
-3. `MainApplication.kt` — `packages.add(<LibPackage>())`, guarded with `packages.none { it is <LibPackage> }`
+1. Confirm it is in `apps/employee-mobile/package.json` and `pnpm install --frozen-lockfile --offline` passes.
+2. Delete `android/build/generated/autolinking/` (its cache key ignores the repo-root `pnpm-lock.yaml`).
+3. Check `node --eval "require(require.resolve('expo-modules-autolinking',{paths:[require.resolve('expo/package.json')]}))(process.argv.slice(1))" react-native-config --json --platform android` lists it.
+4. Rebuild and watch `adb logcat | grep -E "FATAL|ViewManager"` on first launch.
 
-Verify with `adb logcat | grep -E "FATAL|ViewManager"` on first launch. Also delete
-`android/build/generated/autolinking/` after changing dependencies — its cache key ignores the
-repo-root `pnpm-lock.yaml`.
+`MainApplication.kt` registers `SafeAreaContextPackage` behind a `packages.none { ... }` guard so it works whether or not autolinking includes it.

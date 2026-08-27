@@ -37,8 +37,3 @@ useExpoModules()
 include ':app'
 includeBuild(new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile())
 
-// Manually linked: Expo's react-native-config autolinking does not pick this library up in the pnpm
-// workspace layout (see apps/employee-mobile/README.md). Keep in sync with app/build.gradle and
-// MainApplication.kt.
-include ':react-native-safe-area-context'
-project(':react-native-safe-area-context').projectDir = new File(["node", "--print", "require.resolve('react-native-safe-area-context/package.json')"].execute(null, rootDir).text.trim(), "../android")
