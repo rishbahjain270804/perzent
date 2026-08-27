@@ -25,7 +25,11 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.WAKE_LOCK",
         "android.permission.RECEIVE_BOOT_COMPLETED"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon-foreground.png",
+        "backgroundColor": "#16A34A"
+      }
     },
     "plugins": [
       "expo-secure-store",
@@ -39,6 +43,12 @@
           "locationWhenInUsePermission": "Perzent uses your location to stamp shift check-in and check-out coordinates."
         }
       ]
-    ]
+    ],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/logo-mark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F8FAFC"
+    }
   }
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Image,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -104,6 +105,7 @@ export default function LoginScreen({
         </TouchableOpacity>
 
         <Text style={styles.footer}>Accounts are created by your employer.</Text>
+        <Image source={require('../../assets/developed-by-jsp-coders.png')} style={styles.branding} resizeMode="contain" accessibilityLabel="Developed by JSP Coders" />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -179,4 +181,5 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   footer: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 16 },
+  branding: { alignSelf: 'center', width: 180, height: 72, marginTop: 20 },
 });

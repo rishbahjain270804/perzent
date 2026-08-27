@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Alert,
+  Image,
   StatusBar,
   StyleSheet,
   View,
@@ -73,8 +74,10 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <View style={styles.loadingContainer}>
+          <Image source={require('./assets/logo-mark.png')} style={styles.loadingLogo} resizeMode="contain" />
           <ActivityIndicator size="large" color="#16A34A" />
           <Text style={styles.loadingText}>Preparing your workspace…</Text>
+          <Image source={require('./assets/developed-by-jsp-coders.png')} style={styles.loadingBranding} resizeMode="contain" />
         </View>
       </SafeAreaProvider>
     );
@@ -155,6 +158,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
   },
+  loadingLogo: { width: 96, height: 96, marginBottom: 24 },
+  loadingBranding: { position: 'absolute', bottom: 40, width: 200, height: 80 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(11, 17, 32, 0.85)',
