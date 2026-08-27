@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Alert,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   View,
@@ -11,6 +10,9 @@ import {
   TouchableOpacity,
   AppState,
 } from 'react-native';
+// React Native's own SafeAreaView is iOS-only; with targetSdk 35 Android draws edge-to-edge, so the
+// status bar and gesture bar overlap content unless we apply real insets.
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
 import DutyDashboardScreen from './src/screens/DutyDashboardScreen';
 import { DeviceBindingService } from './src/services/DeviceBindingService';
@@ -69,16 +71,19 @@ export default function App() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#16A34A" />
-        <Text style={styles.loadingText}>Preparing your workspace…</Text>
-      </View>
+      <SafeAreaProvider>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#16A34A" />
+          <Text style={styles.loadingText}>Preparing your workspace…</Text>
+        </View>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+    <SafeAreaProvider>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" translucent />
       {session ? (
         <DutyDashboardScreen
           session={session}
@@ -130,6 +135,7 @@ export default function App() {
         </Modal>
       )}
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 

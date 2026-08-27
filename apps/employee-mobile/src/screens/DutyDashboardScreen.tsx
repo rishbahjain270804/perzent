@@ -27,6 +27,8 @@ type ShiftPolicy = { timezone: string; auto_checkout_time: string; max_break_min
 
 const DEFAULT_POLICY: ShiftPolicy = { timezone: 'Asia/Kolkata', auto_checkout_time: '23:40', max_break_minutes: 30 };
 const READINESS_INTERVAL_MS = 15_000;
+/** Every 4th readiness tick (60 s) the shift state is re-read from the server while a shift is open. */
+const SERVER_SYNC_EVERY_TICKS = 4;
 const JS_PING_INTERVAL_MS = 15_000;
 const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
 const PRIVACY_POLICY_URL = 'https://perzent.vercel.app/privacy';
@@ -262,11 +264,16 @@ export default function DutyDashboardScreen({
       }
     })();
 
+    let ticks = 0;
     const timer = setInterval(async () => {
+      ticks += 1;
       refreshReadiness();
       if (isManager) loadManagerTeam();
       const state = await BackgroundTrackingService.getState();
-      if (state.auth_invalid || state.shift_ended_remotely || state.permission_revoked) {
+      // Re-sync with the server when the native service raised a flag, and periodically while a shift is
+      // open so changes made elsewhere (manager check-out, kiosk, auto policies) reach the screen.
+      const periodicDue = shiftStatusRef.current !== 'CHECKED_OUT' && ticks % SERVER_SYNC_EVERY_TICKS === 0;
+      if (state.auth_invalid || state.shift_ended_remotely || state.permission_revoked || periodicDue) {
         syncAttendanceState();
       }
     }, READINESS_INTERVAL_MS);
@@ -343,7 +350,7 @@ export default function DutyDashboardScreen({
 
   const showActionError = (title: string, error: unknown) => {
     if (isUnauthorizedError(error)) return; // App.tsx is already returning to Login.
-    const message = error instanceof Error && error.message ? error.message : 'Something went wrong. Please try again.';
+    const message = error instanceof Error && error.message ? error.message : 'The app hit an unexpected problem. Please try again.';
     Alert.alert(title, message);
     if (error instanceof ApiError && error.code && STATE_DRIFT_CODES.has(error.code)) {
       syncAttendanceState();

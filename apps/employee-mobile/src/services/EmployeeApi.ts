@@ -54,29 +54,68 @@ export function describeHttpFailure(status: number, body: any, fallback: string)
   return fallback;
 }
 
+/** Give up on a single attempt after this long; the field network can stall silently. */
+const REQUEST_TIMEOUT_MS = 25_000;
+const RETRY_DELAY_MS = 1_500;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * JSON request with a timeout and ONE automatic retry on network failure / 5xx.
+ * Retrying attendance actions is safe: the server rejects duplicates with 409 codes
+ * (SHIFT_ACTIVE / BREAK_ACTIVE / NO_ACTIVE_BREAK) which the screen treats as "re-sync".
+ */
 async function request(
   session: SessionLike,
   path: string,
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   body: unknown,
-  fallback: string
+  fallback: string,
+  attempt = 0
 ): Promise<any> {
+  const init: RequestInit = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  };
+
   let response: Response;
+  let data: any = null;
   try {
-    response = await fetch(`${API_CONFIG.BASE_URL}${path}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
-    throw new ApiError('Network unavailable. Check your internet connection and try again.', 0);
+    response = await fetchWithTimeout(`${API_CONFIG.BASE_URL}${path}`, init);
+    data = await parseBody(response);
+  } catch (error: any) {
+    if (attempt === 0) {
+      await wait(RETRY_DELAY_MS);
+      return request(session, path, method, body, fallback, attempt + 1);
+    }
+    const timedOut = error?.name === 'AbortError';
+    throw new ApiError(
+      timedOut
+        ? 'The server took too long to respond. Check your connection and try again.'
+        : 'Network unavailable. Check your internet connection and try again.',
+      0
+    );
   }
 
-  const data = await parseBody(response);
   if (response.ok) return data;
+  if (response.status >= 500 && attempt === 0) {
+    await wait(RETRY_DELAY_MS);
+    return request(session, path, method, body, fallback, attempt + 1);
+  }
 
   const message = describeHttpFailure(response.status, data, fallback);
   if (response.status === 401) {
