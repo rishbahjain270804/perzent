@@ -55,7 +55,13 @@ export async function GET(request: Request) {
           ? 'CHECKED_OUT'
           : attendance.status;
 
-      const pingDate = waypoint?.recorded_at || attendance?.punch_in_time || null;
+      // Presence = latest of the last stored GPS point and the device heartbeat (telemetry PATCH /
+      // waypoint POST). Stationary employees no longer produce GPS rows, so the heartbeat is what
+      // keeps them "live" on the map; the marker stays at the last stored position.
+      const onShift = shiftStatus === 'CHECKED_IN' || shiftStatus === 'ON_BREAK';
+      const heartbeat = onShift && device?.last_seen_at && attendance && device.last_seen_at > attendance.punch_in_time ? device.last_seen_at : null;
+      const candidates = [waypoint?.recorded_at, heartbeat, attendance?.punch_in_time].filter((d): d is Date => Boolean(d));
+      const pingDate = candidates.length ? new Date(Math.max(...candidates.map((d) => d.getTime()))) : null;
       const secondsSinceLastPing = pingDate ? Math.max(0, Math.floor((nowEpoch - pingDate.getTime()) / 1000)) : null;
       const isGpsDisconnected =
         shiftStatus === 'CHECKED_IN' && secondsSinceLastPing !== null && secondsSinceLastPing > SYSTEM_CONFIG.LIVE_STALE_SECONDS;

@@ -10,6 +10,10 @@ export const SYSTEM_CONFIG = {
   MAX_WAYPOINT_AGE_DAYS: 7, // reject timestamps older than this
   MAX_WAYPOINT_FUTURE_SKEW_MS: 5 * 60 * 1000,
   MAX_WAYPOINTS_PER_BATCH: 500,
+  /** A point closer than this to the last stored point is not movement and is not stored… */
+  MIN_MOVE_DISTANCE_METERS: 10,
+  /** …except one "still here" sample per interval so dwell time can still be computed. */
+  STATIONARY_SAMPLE_INTERVAL_MS: 10 * 60 * 1000,
 
   // Live map freshness thresholds (seconds)
   LIVE_FRESH_SECONDS: 60,

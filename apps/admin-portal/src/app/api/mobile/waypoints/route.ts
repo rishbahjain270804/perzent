@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
+import { calculateHaversineDistance } from '@perzent/location-engine';
 import { SYSTEM_CONFIG, WaypointBatchSchema } from '@perzent/shared-types';
 import { findOpenAttendance } from '@/lib/attendance';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
@@ -54,15 +55,38 @@ export async function POST(request: Request) {
 
     let fresh = candidates;
     if (candidates.length > 0) {
-      const existing = await prisma.locationWaypoint.findMany({
-        where: {
-          attendance_id: attendance.id,
-          recorded_at: { gte: candidates[0].recorded_at, lte: candidates[candidates.length - 1].recorded_at },
-        },
-        select: { recorded_at: true },
-      });
+      const [existing, lastStored] = await Promise.all([
+        prisma.locationWaypoint.findMany({
+          where: {
+            attendance_id: attendance.id,
+            recorded_at: { gte: candidates[0].recorded_at, lte: candidates[candidates.length - 1].recorded_at },
+          },
+          select: { recorded_at: true },
+        }),
+        prisma.locationWaypoint.findFirst({
+          where: { attendance_id: attendance.id },
+          orderBy: { recorded_at: 'desc' },
+          select: { latitude: true, longitude: true, recorded_at: true },
+        }),
+      ]);
       const existingKeys = new Set(existing.map((row) => secondKey(row.recorded_at)));
-      fresh = candidates.filter((point) => !existingKeys.has(secondKey(point.recorded_at)));
+
+      // Movement thinning: a point within MIN_MOVE_DISTANCE_METERS of the last stored point is not
+      // movement. Keep it only as a "still here" sample once per STATIONARY_SAMPLE_INTERVAL_MS so dwell
+      // time stays computable; everything else stationary is dropped (presence is tracked separately
+      // via the device heartbeat). Applies to every client, including older app builds.
+      let lastKept = lastStored;
+      fresh = [];
+      for (const point of candidates) {
+        if (existingKeys.has(secondKey(point.recorded_at))) continue;
+        if (lastKept) {
+          const metres = calculateHaversineDistance(lastKept, point);
+          const elapsed = point.recorded_at.getTime() - lastKept.recorded_at.getTime();
+          if (metres < SYSTEM_CONFIG.MIN_MOVE_DISTANCE_METERS && elapsed < SYSTEM_CONFIG.STATIONARY_SAMPLE_INTERVAL_MS) continue;
+        }
+        fresh.push(point);
+        lastKept = point;
+      }
     }
 
     let ingested = 0;
