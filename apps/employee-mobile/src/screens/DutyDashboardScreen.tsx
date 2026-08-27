@@ -77,10 +77,13 @@ export default function DutyDashboardScreen({
   session,
   deviceInfo,
   onLogout,
+  onShiftStatus,
 }: {
   session: any;
   deviceInfo?: any;
   onLogout: () => void;
+  /** Lets the app shell know whether a shift is open (status screens mention that tracking continues). */
+  onShiftStatus?: (onDuty: boolean) => void;
 }) {
   const isManager = session.role === 'MANAGER';
   const userId: string = session.user_id || session.id || '';
@@ -123,7 +126,8 @@ export default function DutyDashboardScreen({
 
   useEffect(() => {
     shiftStatusRef.current = shiftStatus;
-  }, [shiftStatus]);
+    onShiftStatus?.(shiftStatus !== 'CHECKED_OUT');
+  }, [shiftStatus, onShiftStatus]);
 
   const serverNow = () => Date.now() + serverOffsetRef.current;
 

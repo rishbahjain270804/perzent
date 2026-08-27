@@ -4,6 +4,7 @@ import { DeviceInfoSchema, DeviceTelemetrySchema, MobileAttendanceActionSchema, 
 import { checkIn, checkOut, endBreak, isOpen, resolveCurrentAttendance, startBreak, type AttendanceWithBreak } from '@/lib/attendance';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
 import { getCompanyPolicy, type CompanyPolicy } from '@/lib/policy';
+import { getAppConfig, maintenanceApplies, statusView } from '@/lib/app-config';
 import { workDateFor } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -55,6 +56,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
+    const config = await getAppConfig();
+    if (maintenanceApplies(config, 'MOBILE')) {
+      const status = statusView(config);
+      return NextResponse.json(
+        { error: status.maintenance.message, code: 'MAINTENANCE', maintenance: status.maintenance },
+        { status: 503, headers: { 'Retry-After': '300' } }
+      );
+    }
     const body = MobileAttendanceActionSchema.parse(await request.json());
     const policy = await getCompanyPolicy(session.companyId);
 

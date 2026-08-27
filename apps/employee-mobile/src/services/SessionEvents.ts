@@ -1,10 +1,13 @@
 /**
- * Process-wide hook so any API layer (attendance, waypoint queue, native flags)
- * can force the app back to the Login screen when the session is no longer valid.
+ * Process-wide hooks so any API layer (attendance, waypoint queue, native flags) can force the app
+ * back to the Login screen when the session is no longer valid, or into maintenance mode when the
+ * server says so.
  */
 type UnauthorizedHandler = () => void;
+type MaintenanceHandler = (payload: any) => void;
 
 let handler: UnauthorizedHandler | null = null;
+let maintenanceHandler: MaintenanceHandler | null = null;
 let firing = false;
 
 export const SessionEvents = {
@@ -23,5 +26,14 @@ export const SessionEvents = {
         firing = false;
       }, 2000);
     }
+  },
+
+  setMaintenanceHandler(next: MaintenanceHandler | null) {
+    maintenanceHandler = next;
+  },
+
+  /** Called with the `{ error, code: 'MAINTENANCE', maintenance }` payload of a 503 response. */
+  emitMaintenance(payload: any) {
+    maintenanceHandler?.(payload);
   },
 };

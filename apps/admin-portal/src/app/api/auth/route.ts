@@ -15,6 +15,7 @@ import {
 } from '@/lib/auth';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 import { supabaseDirectConfig } from '@/lib/supabase-token';
+import { getAppConfig, maintenanceApplies, statusView } from '@/lib/app-config';
 import { isValidTimeZone } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -120,6 +121,14 @@ export async function POST(request: Request) {
 
     // Login
     const parsed = LoginSchema.parse(body);
+    const config = await getAppConfig();
+    if (maintenanceApplies(config, parsed.device_uuid ? 'MOBILE' : 'WEB')) {
+      const status = statusView(config);
+      return NextResponse.json(
+        { error: status.maintenance.message, code: 'MAINTENANCE', maintenance: status.maintenance },
+        { status: 503, headers: { 'Retry-After': '300' } }
+      );
+    }
     const identifier = normalizeIdentifier(parsed.phone_or_email);
     const limitKey = `login:${ip}:${identifier.toLowerCase()}`;
     const blocked = rateLimit(limitKey, 10, 10 * 60 * 1000);

@@ -280,6 +280,32 @@ model LocationWaypoint {
   @@index([attendance_id, recorded_at])
 }
 
+/// Remote-controlled app/portal status. Single row (id = "global") edited directly in the database
+/// (Supabase Table Editor) — no code change or app release needed to put the product in maintenance,
+/// show an announcement, or change the advertised app version.
+model AppConfig {
+  id                       String    @id @default("global")
+  /// Blocks sign-in and shift actions; background tracking keeps queueing.
+  maintenance_enabled      Boolean   @default(false)
+  /// ALL | MOBILE | WEB
+  maintenance_scope        String    @default("ALL")
+  maintenance_title        String?
+  maintenance_message      String?
+  /// Shown to users as "expected back at"; informational only.
+  maintenance_until        DateTime?
+  /// Banner shown inside the app and portal (null = none). Level: INFO | WARNING | CRITICAL
+  announcement             String?
+  announcement_level       String    @default("INFO")
+  /// Overrides for /api/mobile/version (null = use the deployed defaults)
+  latest_app_version       String?
+  latest_app_version_code  Int?
+  min_app_version_code     Int?
+  play_store_url           String?
+  support_email            String?
+  support_phone            String?
+  updated_at               DateTime  @updatedAt
+}
+
 /// Compact per-shift route storage. Closed shifts are compacted nightly: the raw LocationWaypoint rows
 /// (~340 B each) are encoded into one row (~5 B per point) and deleted. Routes for past days are read
 /// from here; today's open shifts still read LocationWaypoint.

@@ -75,6 +75,22 @@ Health: `GET /api` (checks the database). Sideload APK: `GET /api/download/apk` 
 
 See `apps/employee-mobile/RELEASE.md` (keystore, `keystore.properties`, `bundleRelease`, Play Console data-safety and background-location declaration, version bump rules). The app version advertised to phones lives in `apps/admin-portal/src/lib/app-version.ts` and must be bumped with `app.json` / `build.gradle`.
 
+## Remote status (maintenance, announcements, version) — no release needed
+
+Table `AppConfig`, single row `id = global` (edit in Supabase → Table Editor). Read by `GET /api/status`
+(public, cached 30 s), `GET /api/mobile/version`, the app (on launch, resume, every 5 min and on any
+`503 MAINTENANCE`) and the portal (every 60 s).
+
+| Column | Effect |
+|---|---|
+| `maintenance_enabled` + `maintenance_scope` (`ALL` / `MOBILE` / `WEB`) | Sign-in and shift actions return `503 { code: "MAINTENANCE" }`; the app shows the maintenance screen (background tracking keeps queueing); the portal shows a maintenance page (`/`, `/privacy`, `/download` stay reachable). |
+| `maintenance_title`, `maintenance_message`, `maintenance_until` | Text shown on those screens; `until` is informational. |
+| `announcement`, `announcement_level` (`INFO` / `WARNING` / `CRITICAL`) | Banner at the top of the app and the portal. Clear the text to hide it. |
+| `latest_app_version`, `latest_app_version_code`, `min_app_version_code`, `play_store_url` | Override the deployed defaults in `src/lib/app-version.ts` (null = default). Raising `min_app_version_code` forces older builds to update. |
+| `support_email`, `support_phone` | Shown on the maintenance / error screens. |
+
+Other app states handled on-device: no internet (NetInfo), server unreachable (status call fails while online), session expired (401), crash (error boundary with reload).
+
 ## API overview
 
 All JSON; errors are `{ error, code? }`. Sessions: HttpOnly cookie for the web, `Authorization: Bearer <token>` for the app.

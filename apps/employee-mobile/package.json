@@ -19,6 +19,7 @@
     "@perzent/location-engine": "workspace:*",
     "@perzent/shared-types": "workspace:*",
     "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-native-community/netinfo": "11.4.1",
     "expo": "~52.0.0",
     "expo-application": "~6.0.2",
     "expo-asset": "~11.0.5",

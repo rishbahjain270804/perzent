@@ -123,6 +123,9 @@ async function request(
     // Any authenticated call that returns 401 means the session is dead: kick back to Login.
     SessionEvents.emitUnauthorized();
   }
+  if (response.status === 503 && data?.code === 'MAINTENANCE') {
+    SessionEvents.emitMaintenance(data);
+  }
   throw new ApiError(message, response.status, typeof data?.code === 'string' ? data.code : undefined);
 }
 
@@ -147,6 +150,7 @@ export class EmployeeApi {
       throw new ApiError('Network unavailable. Check your internet connection and try again.', 0);
     }
     const result = await parseBody(response);
+    if (response.status === 503 && result?.code === 'MAINTENANCE') SessionEvents.emitMaintenance(result);
     if (!response.ok) {
       const message =
         result && typeof result.error === 'string' && result.error.trim()
