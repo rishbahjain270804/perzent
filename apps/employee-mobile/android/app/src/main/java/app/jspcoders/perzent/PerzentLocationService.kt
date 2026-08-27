@@ -87,12 +87,16 @@ class PerzentLocationService : Service() {
         const val ACTION_START = "app.jspcoders.perzent.ACTION_START_TRACKING"
         const val ACTION_STOP = "app.jspcoders.perzent.ACTION_STOP_TRACKING"
 
-        // Fused provider cadence (kept at 3 s for a smooth live map); uploads are coalesced below.
+        // Fused provider cadence (kept at 3 s for a smooth live map). Points are only QUEUED when the
+        // device has moved; while stationary one "still here" sample per 10 min is enough for dwell
+        // time (presence is carried by the telemetry heartbeat). Queued points are FLUSHED in small
+        // batches so a moving employee costs one request per ~6 s instead of one per fix.
         const val UPDATE_INTERVAL_MS = 3_000L
         const val FASTEST_INTERVAL_MS = 1_500L
-        const val MOVING_UPLOAD_INTERVAL_MS = 3_000L
-        const val STATIONARY_UPLOAD_INTERVAL_MS = 15_000L
-        const val STATIONARY_DISTANCE_METERS = 8f
+        const val MOVING_QUEUE_INTERVAL_MS = 3_000L
+        const val STATIONARY_QUEUE_INTERVAL_MS = 10 * 60_000L
+        const val MOVING_DISTANCE_METERS = 10f
+        const val FLUSH_INTERVAL_MS = 6_000L
         const val TELEMETRY_INTERVAL_MS = 45_000L
         const val NOTIFICATION_REFRESH_MS = 15_000L
         const val BACKOFF_MIN_MS = 5_000L
@@ -574,11 +578,12 @@ class PerzentLocationService : Service() {
 
         val nowElapsed = SystemClock.elapsedRealtime()
         val previous = lastAcceptedLocation
-        val moved = previous == null || previous.distanceTo(location) > STATIONARY_DISTANCE_METERS
-        val minInterval = if (moved) MOVING_UPLOAD_INTERVAL_MS else STATIONARY_UPLOAD_INTERVAL_MS
-        val uploadDue = lastUploadElapsedMs == 0L || nowElapsed - lastUploadElapsedMs >= minInterval
+        // "Moved" is measured from the last point we actually kept, so slow drift accumulates.
+        val moved = previous == null || previous.distanceTo(location) >= MOVING_DISTANCE_METERS
+        val minInterval = if (moved) MOVING_QUEUE_INTERVAL_MS else STATIONARY_QUEUE_INTERVAL_MS
+        val queueDue = lastUploadElapsedMs == 0L || nowElapsed - lastUploadElapsedMs >= minInterval
 
-        if (uploadDue) {
+        if (queueDue) {
             lastUploadElapsedMs = nowElapsed
             lastAcceptedLocation = location
             val recordedAt = formatIso8601(Date(location.time.takeIf { it > 0 } ?: System.currentTimeMillis()))
@@ -591,10 +596,8 @@ class PerzentLocationService : Service() {
                 put("recorded_at", recordedAt)
             }
             Log.d(TAG, "Queue waypoint lat=${location.latitude} lng=${location.longitude} moved=$moved")
-            submit {
-                enqueueWaypoint(waypoint)
-                flushQueue(token, apiBase)
-            }
+            submit { enqueueWaypoint(waypoint) }
+            scheduleBatchedFlush(nowElapsed)
         }
 
         if (nowElapsed - lastTelemetryElapsedMs >= TELEMETRY_INTERVAL_MS) {
@@ -667,6 +670,22 @@ class PerzentLocationService : Service() {
         val currentBase = apiBase
         if (currentToken.isEmpty()) return
         submit { flushQueue(currentToken, currentBase) }
+    }
+
+    private var lastFlushElapsedMs = 0L
+    private var batchedFlushPending = false
+    private val batchedFlushRunnable = Runnable {
+        batchedFlushPending = false
+        lastFlushElapsedMs = SystemClock.elapsedRealtime()
+        scheduleFlush()
+    }
+
+    /** Main thread. Flushes at most once per [FLUSH_INTERVAL_MS]; a queued point never waits longer than that. */
+    private fun scheduleBatchedFlush(nowElapsed: Long) {
+        if (batchedFlushPending) return
+        val wait = (lastFlushElapsedMs + FLUSH_INTERVAL_MS - nowElapsed).coerceIn(0L, FLUSH_INTERVAL_MS)
+        batchedFlushPending = true
+        mainHandler.postDelayed(batchedFlushRunnable, wait)
     }
 
     private fun scheduleBackoff() {

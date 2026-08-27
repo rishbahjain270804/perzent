@@ -29,7 +29,8 @@ const DEFAULT_POLICY: ShiftPolicy = { timezone: 'Asia/Kolkata', auto_checkout_ti
 const READINESS_INTERVAL_MS = 15_000;
 /** Every 4th readiness tick (60 s) the shift state is re-read from the server while a shift is open. */
 const SERVER_SYNC_EVERY_TICKS = 4;
-const JS_PING_INTERVAL_MS = 15_000;
+/** JS-side fallback ping; the native service is the primary tracker, so this only needs to be a safety net. */
+const JS_PING_INTERVAL_MS = 60_000;
 const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
 const PRIVACY_POLICY_URL = 'https://perzent.vercel.app/privacy';
 /** Server codes that mean our local shift state drifted from the server's: re-sync after showing the error. */
