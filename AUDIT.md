@@ -29,6 +29,14 @@ After this pass the **free** core flow — register → add staff → employee c
 | Automated tests | none | none (CI = typecheck + build) |
 | Monitoring | none | DB health check only |
 
+## Real-device test (28 Aug 2026, Galaxy S24 / Android 16, production)
+
+Passed: install + device binding, readiness gate, prominent disclosure → "Allow all the time", check-in → live map, background with another app, GPS off/on from settings (owner feed flags after 2 min), airplane mode (offline queue flush), swipe-away from recents (service self-restarts), permission revoked mid-shift (clean stop + alert, resumes on re-grant), break/resume, 5-minute break cap, auto check-out at cut-off (tracker stops on 409), reboot mid-shift (after fix: boot receiver resumes tracking without opening the app), check-out → timesheet/route (278 waypoints, 1 dwell stop, 3 break intervals). Owner portal: 17 Playwright steps pass.
+
+Fixed as a result: Vercel functions pinned to `bom1` + DB pool limit 5 (calls 7–15 s → 0.2–0.5 s), Android safe-area insets, BOOT_COMPLETED receiver + live-instance tracking state, 60 s server re-sync while on shift, 25 s request timeout + one retry, `/download` hydration.
+
+Still untested: Xiaomi/Vivo/Oppo task killers, a moving route, overnight shifts.
+
 ## Still missing
 
 **P0 – Play Store submission**
