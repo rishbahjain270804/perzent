@@ -30,7 +30,9 @@ const READINESS_INTERVAL_MS = 15_000;
 /** Every 4th readiness tick (60 s) the shift state is re-read from the server while a shift is open. */
 const SERVER_SYNC_EVERY_TICKS = 4;
 /** JS-side fallback ping; the native service is the primary tracker, so this only needs to be a safety net. */
-const JS_PING_INTERVAL_MS = 60_000;
+const JS_PING_INTERVAL_MS = 2 * 60 * 1000;
+/** The native service heartbeats telemetry every 45 s while tracking; the JS side only needs a slow backup cadence. */
+const ON_DUTY_TELEMETRY_INTERVAL_MS = 2 * 60 * 1000;
 const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
 const PRIVACY_POLICY_URL = 'https://perzent.vercel.app/privacy';
 /** Server codes that mean our local shift state drifted from the server's: re-sync after showing the error. */
@@ -171,8 +173,9 @@ export default function DutyDashboardScreen({
         setReadiness(next);
         // Telemetry cadence: every 15 s while a shift is open, at most every 10 min while off duty.
         const shiftOpen = shiftStatusRef.current !== 'CHECKED_OUT';
-        const offDutyDue = Date.now() - lastTelemetryPatchRef.current >= OFF_DUTY_TELEMETRY_INTERVAL_MS;
-        if (options.forceUpload || shiftOpen || offDutyDue) {
+        const sinceLastPatch = Date.now() - lastTelemetryPatchRef.current;
+        const due = sinceLastPatch >= (shiftOpen ? ON_DUTY_TELEMETRY_INTERVAL_MS : OFF_DUTY_TELEMETRY_INTERVAL_MS);
+        if (options.forceUpload || due) {
           lastTelemetryPatchRef.current = Date.now();
           await EmployeeApi.attendance(session, 'PATCH', {
             telemetry: next.telemetry,
