@@ -31,3 +31,17 @@ of that. Plain `expo prebuild` is also discouraged; make native changes by editi
 ## Release
 
 See [`RELEASE.md`](./RELEASE.md) for the Play Store checklist.
+
+## Adding React Native libraries with native code
+
+Expo's `react-native-config` autolinking does **not** detect some community libraries in this pnpm
+workspace (observed with `react-native-safe-area-context`: the build succeeded but the app crashed
+with `No ViewManager found for class RNCSafeAreaProvider`). Link such libraries manually:
+
+1. `android/settings.gradle` — `include ':<lib>'` + `project(':<lib>').projectDir = .../node_modules/<lib>/android`
+2. `android/app/build.gradle` — `implementation project(':<lib>')`
+3. `MainApplication.kt` — `packages.add(<LibPackage>())`, guarded with `packages.none { it is <LibPackage> }`
+
+Verify with `adb logcat | grep -E "FATAL|ViewManager"` on first launch. Also delete
+`android/build/generated/autolinking/` after changing dependencies — its cache key ignores the
+repo-root `pnpm-lock.yaml`.

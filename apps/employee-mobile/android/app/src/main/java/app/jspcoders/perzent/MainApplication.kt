@@ -24,6 +24,11 @@ class MainApplication : Application(), ReactApplication {
           override fun getPackages(): List<ReactPackage> {
             val packages = PackageList(this).packages
             packages.add(DeviceIntegrityPackage())
+            // react-native-safe-area-context is linked manually (settings.gradle); guard against a
+            // double registration in case autolinking starts detecting it.
+            if (packages.none { it is com.th3rdwave.safeareacontext.SafeAreaContextPackage }) {
+              packages.add(com.th3rdwave.safeareacontext.SafeAreaContextPackage())
+            }
             return packages
           }
 
