@@ -1,27 +1,27 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
 import { prisma } from '@perzent/database';
-import { authErrorResponse, requireSession } from '@/lib/auth';
+import { CompanySettingsSchema } from '@perzent/shared-types';
+import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
+import { isValidTimeZone } from '@/lib/time';
 
-const SettingsSchema = z.object({
-  auto_checkout_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  max_break_minutes: z.number().int().min(5).max(180),
-  timezone: z.string().min(1).max(100),
-  standard_daily_hours: z.number().min(1).max(24).optional(),
+export const dynamic = 'force-dynamic';
+
+const settingsView = (company: any) => ({
+  name: company.name,
+  auto_checkout_time: company.auto_checkout_time,
+  max_break_minutes: company.max_break_minutes,
+  standard_daily_hours: company.standard_daily_hours,
+  route_retention_days: company.route_retention_days,
+  attendance_retention_days: company.attendance_retention_days,
+  timezone: company.timezone,
+  plan_tier: company.plan_tier,
 });
 
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER']);
     const company = await prisma.company.findUniqueOrThrow({ where: { id: session.companyId } });
-    return NextResponse.json({
-      auto_checkout_time: company.auto_checkout_time,
-      max_break_minutes: company.max_break_minutes,
-      standard_daily_hours: company.standard_daily_hours,
-      route_retention_days: company.route_retention_days,
-      attendance_retention_days: company.attendance_retention_days,
-      timezone: company.timezone,
-    });
+    return NextResponse.json(settingsView(company));
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -30,22 +30,12 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER']);
-    const parsed = SettingsSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-    }
-    const company = await prisma.company.update({
-      where: { id: session.companyId },
-      data: parsed.data,
-    });
-    return NextResponse.json({
-      auto_checkout_time: company.auto_checkout_time,
-      max_break_minutes: company.max_break_minutes,
-      standard_daily_hours: company.standard_daily_hours,
-      route_retention_days: company.route_retention_days,
-      attendance_retention_days: company.attendance_retention_days,
-      timezone: company.timezone,
-    });
+    const parsed = CompanySettingsSchema.parse(await request.json());
+    if (parsed.timezone && !isValidTimeZone(parsed.timezone)) return jsonError('Unknown timezone', 400, 'VALIDATION');
+    const data = Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined));
+    if (Object.keys(data).length === 0) return jsonError('Nothing to update', 400, 'VALIDATION');
+    const company = await prisma.company.update({ where: { id: session.companyId }, data });
+    return NextResponse.json(settingsView(company));
   } catch (error) {
     return authErrorResponse(error);
   }

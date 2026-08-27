@@ -81,6 +81,46 @@ def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInRelea
  */
 def jscFlavor = 'org.webkit:android-jsc:+'
 
+/**
+ * Release signing.
+ *
+ * Reads android/keystore.properties (git-ignored) with the keys:
+ *   storeFile=perzent-release.keystore   (path relative to android/app)
+ *   storePassword=...
+ *   keyAlias=...
+ *   keyPassword=...
+ * When the file (and the keystore it points to) exists, release builds are signed
+ * with it. Otherwise a loud warning is printed and the debug key is used so local
+ * builds still work - never upload such a build to Google Play.
+ */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = false
+def signingWarning = { String reason ->
+    logger.warn("********************************************************************************")
+    logger.warn("* WARNING: " + reason)
+    logger.warn("* Release builds will be signed with the DEBUG key and must NOT be published.")
+    logger.warn("* See apps/employee-mobile/RELEASE.md to configure release signing.")
+    logger.warn("********************************************************************************")
+}
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream -> keystoreProperties.load(stream) }
+    def requiredKeys = ["storeFile", "storePassword", "keyAlias", "keyPassword"]
+    def missingKeys = requiredKeys.findAll { key -> !keystoreProperties.getProperty(key)?.trim() }
+    if (missingKeys.isEmpty()) {
+        def storeFilePath = file(keystoreProperties.getProperty("storeFile"))
+        if (storeFilePath.exists()) {
+            hasReleaseKeystore = true
+        } else {
+            signingWarning("android/keystore.properties points to a keystore that does not exist: " + storeFilePath)
+        }
+    } else {
+        signingWarning("android/keystore.properties is missing keys: " + missingKeys.join(", "))
+    }
+} else {
+    signingWarning("android/keystore.properties not found.")
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
 
@@ -92,10 +132,10 @@ android {
         applicationId 'app.jspcoders.perzent'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
-        versionName "1.1.7"
+        versionCode 12
+        versionName "1.2.0"
         ndk {
-            abiFilters 'arm64-v8a'
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
     }
     signingConfigs {
@@ -105,15 +145,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (hasReleaseKeystore) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Signed with android/keystore.properties when present (see RELEASE.md).
+            // Without it the build falls back to the debug key and is NOT publishable.
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

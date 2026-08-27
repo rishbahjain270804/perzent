@@ -1,11 +1,5 @@
 package app.jspcoders.perzent
 
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.BatteryManager
-import android.os.PowerManager
-import android.provider.Settings
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -21,23 +15,15 @@ class DeviceIntegrityModule(
   @ReactMethod
   fun getStatus(promise: Promise) {
     try {
-      val batteryManager = reactContext.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-      val batteryIntent = reactContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-      val batteryStatus = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-      val charging = batteryStatus == BatteryManager.BATTERY_STATUS_CHARGING ||
-        batteryStatus == BatteryManager.BATTERY_STATUS_FULL
-      val powerManager = reactContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-      val developerOptionsEnabled = Settings.Global.getInt(
-        reactContext.contentResolver,
-        Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
-        0
-      ) == 1
-
       val result = Arguments.createMap().apply {
-        putDouble("batteryLevel", batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).toDouble())
-        putBoolean("batteryCharging", charging)
-        putBoolean("powerSaveMode", powerManager.isPowerSaveMode)
-        putBoolean("developerOptionsEnabled", developerOptionsEnabled)
+        putDouble("batteryLevel", DeviceStatus.batteryLevel(reactContext).toDouble())
+        putBoolean("batteryCharging", DeviceStatus.isCharging(reactContext))
+        putString("batteryStatus", DeviceStatus.batteryStatus(reactContext))
+        putBoolean("powerSaveMode", DeviceStatus.isPowerSaveMode(reactContext))
+        putBoolean("developerOptionsEnabled", DeviceStatus.developerOptionsEnabled(reactContext))
+        putBoolean("locationServicesEnabled", DeviceStatus.locationServicesEnabled(reactContext))
+        putBoolean("locationPermissionGranted", DeviceStatus.hasFineLocationPermission(reactContext))
+        putBoolean("backgroundLocationPermissionGranted", DeviceStatus.hasBackgroundLocationPermission(reactContext))
       }
       promise.resolve(result)
     } catch (error: Exception) {

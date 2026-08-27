@@ -6,31 +6,34 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@perzent/shared-types": "workspace:*",
-    "@perzent/location-engine": "workspace:*",
-    "@perzent/database": "workspace:*",
-    "@prisma/client": "^6.19.3",
     "@cashfreepayments/cashfree-js": "^1.0.7",
+    "@perzent/database": "workspace:*",
+    "@perzent/location-engine": "workspace:*",
+    "@perzent/shared-types": "workspace:*",
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.2",
+    "clsx": "^2.1.1",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.475.0",
     "next": "^15.2.3",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.475.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^3.0.1",
-    "leaflet": "^1.9.4",
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.16",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/leaflet": "^1.9.16",
-    "typescript": "^5.7.3",
     "postcss": "^8",
-    "tailwindcss": "^3.4.1"
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.7.3"
   }
 }

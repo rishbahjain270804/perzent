@@ -1,210 +1,251 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useCallback, useEffect, useState } from 'react';
+import { CalendarDays, RefreshCw, Check, X } from 'lucide-react';
+import { apiFetch, errorMessage, formatDate } from '@/lib/client';
 import {
-  CalendarDays,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Plus,
-  RefreshCw,
-  AlertCircle,
-  User,
-} from 'lucide-react';
+  PageHeader,
+  StatusBadge,
+  Modal,
+  EmptyState,
+  ErrorBanner,
+  LoadingRows,
+  Notice,
+  inputClass,
+  labelClass,
+  btnPrimary,
+  btnSecondary,
+  btnDanger,
+  iconBtn,
+  errorText,
+  tableHeadRow,
+  tableRow,
+} from '@/components';
+
+type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+type ReviewAction = 'APPROVE' | 'REJECT';
+
+interface LeaveRequest {
+  id: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  total_days: number;
+  reason: string;
+  status: LeaveStatus;
+  review_notes?: string | null;
+  created_at?: string;
+  user?: { full_name?: string; designation?: string | null; department?: { name?: string } | null } | null;
+  reviewer?: { full_name?: string } | null;
+}
+
+const STATUS_TABS: Array<{ value: LeaveStatus | 'ALL'; label: string }> = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'ALL', label: 'All' },
+];
 
 export default function LeavesManagementPage() {
-  const [requests, setRequests] = useState<any[]>([]);
-  const [balances, setBalances] = useState<any>({ paid: 12, sick: 6, casual: 6 });
+  const [statusFilter, setStatusFilter] = useState<LeaveStatus | 'ALL'>('PENDING');
+  const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState({
-    leave_type: 'CASUAL',
-    start_date: new Date().toISOString().slice(0, 10),
-    end_date: new Date().toISOString().slice(0, 10),
-    reason: '',
-  });
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
-  const fetchLeaves = () => {
+  const [review, setReview] = useState<{ request: LeaveRequest; action: ReviewAction } | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [reviewError, setReviewError] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+
+  const fetchLeaves = useCallback(async () => {
     setLoading(true);
-    fetch('/api/leave')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.requests) setRequests(data.requests);
-        if (data.balances) setBalances(data.balances);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
+    try {
+      const query = statusFilter === 'ALL' ? '' : `?status=${statusFilter}`;
+      const data = await apiFetch<{ requests?: LeaveRequest[] }>(`/api/leave${query}`);
+      setRequests(Array.isArray(data?.requests) ? data.requests : []);
+      setError('');
+    } catch (reason) {
+      setError(errorMessage(reason, 'Could not load leave requests.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
 
   useEffect(() => {
     fetchLeaves();
-  }, []);
+  }, [fetchLeaves]);
 
-  const handleAction = async (id: string, action: 'APPROVE' | 'REJECT') => {
-    setActionLoading(id);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  const openReview = (request: LeaveRequest, action: ReviewAction) => {
+    setReview({ request, action });
+    setReviewNotes('');
+    setReviewError('');
+  };
+
+  const submitReview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!review) return;
+    setReviewing(true);
+    setReviewError('');
     try {
-      const res = await fetch('/api/leave', {
+      await apiFetch('/api/leave', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
+        json: { id: review.request.id, action: review.action, review_notes: reviewNotes.trim() || undefined },
       });
-      if (res.ok) {
-        fetchLeaves();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Action failed');
-      }
-    } catch {
-      alert('Network error');
+      setNotice(`${review.request.user?.full_name || 'Request'} — ${review.action === 'APPROVE' ? 'approved' : 'rejected'}.`);
+      setReview(null);
+      fetchLeaves();
+    } catch (reason) {
+      setReviewError(errorMessage(reason, 'Could not update the request.'));
     } finally {
-      setActionLoading(null);
+      setReviewing(false);
     }
   };
 
-  const handleCreateRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch('/api/leave', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
-        setModalOpen(false);
-        setForm({
-          leave_type: 'CASUAL',
-          start_date: new Date().toISOString().slice(0, 10),
-          end_date: new Date().toISOString().slice(0, 10),
-          reason: '',
-        });
-        fetchLeaves();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to submit leave');
-      }
-    } catch {
-      alert('Network error');
-    }
-  };
-
-  const statusBadge = (status: string) => {
-    if (status === 'APPROVED') return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
-    if (status === 'REJECTED') return 'bg-red-500/15 text-red-400 border-red-500/30';
-    return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
-  };
+  const actions = (request: LeaveRequest) =>
+    request.status === 'PENDING' ? (
+      <div className="inline-flex items-center gap-1.5">
+        <button
+          onClick={() => openReview(request, 'APPROVE')}
+          className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-[11px] font-medium transition inline-flex items-center gap-1"
+        >
+          <Check className="w-3 h-3" /> Approve
+        </button>
+        <button
+          onClick={() => openReview(request, 'REJECT')}
+          className="px-2 py-1 rounded bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-[11px] font-medium transition inline-flex items-center gap-1"
+        >
+          <X className="w-3 h-3" /> Reject
+        </button>
+      </div>
+    ) : (
+      <span className="text-[10px] text-slate-500" title={request.review_notes || undefined}>
+        {request.reviewer?.full_name ? `by ${request.reviewer.full_name}` : 'Processed'}
+        {request.review_notes ? ' · notes' : ''}
+      </span>
+    );
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-base md:text-lg font-bold dashboard-strong tracking-tight">Leave & Absence (PTO)</h1>
-          <p className="text-xs text-[#6B7280]">Request time off, manage leave balances and 1-tap approvals</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={fetchLeaves} className="p-2 rounded border border-slate-700 text-slate-400 hover:text-white transition">
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
+      <PageHeader
+        title="Leaves"
+        description="Requests submitted by employees from the app. Approve or reject with optional notes."
+        actions={
+          <button onClick={fetchLeaves} disabled={loading} className={iconBtn} title="Refresh" aria-label="Refresh">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
+        }
+      />
+
+      {notice && <Notice onDismiss={() => setNotice('')}>{notice}</Notice>}
+      <ErrorBanner message={error} onRetry={fetchLeaves} retrying={loading} />
+
+      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter by status">
+        {STATUS_TABS.map((tab) => (
           <button
-            onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
+            key={tab.value}
+            role="tab"
+            aria-selected={statusFilter === tab.value}
+            onClick={() => setStatusFilter(tab.value)}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition ${
+              statusFilter === tab.value ? 'bg-[#16A34A] border-[#16A34A] text-white' : 'border-slate-700 text-slate-400 hover:text-white'
+            }`}
           >
-            <Plus className="w-3.5 h-3.5" /> Request Leave
+            {tab.label}
           </button>
-        </div>
+        ))}
       </div>
 
-      {/* Balances */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-          <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Paid Leave</span>
-          <p className="text-xl font-bold text-emerald-400 mt-0.5">{balances.paid ?? 12} <span className="text-xs font-normal text-slate-400">days</span></p>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-          <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Sick Leave</span>
-          <p className="text-xl font-bold text-amber-400 mt-0.5">{balances.sick ?? 6} <span className="text-xs font-normal text-slate-400">days</span></p>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-          <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Casual Leave</span>
-          <p className="text-xl font-bold text-cyan-400 mt-0.5">{balances.casual ?? 6} <span className="text-xs font-normal text-slate-400">days</span></p>
-        </div>
+      {/* Mobile */}
+      <div className="md:hidden space-y-2">
+        {loading && <div className="dashboard-card rounded-lg"><LoadingRows rows={3} /></div>}
+        {!loading &&
+          requests.map((r) => (
+            <div key={r.id} className="dashboard-card rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold text-xs dashboard-strong truncate">{r.user?.full_name || 'Employee'}</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">{r.user?.department?.name || r.user?.designation || 'Staff'}</p>
+                </div>
+                <StatusBadge status={r.status} />
+              </div>
+              <div className="grid grid-cols-3 gap-1 pt-2 border-t border-slate-800/60 text-[10px]">
+                <div><span className="text-[#6B7280] block">Type</span><span className="text-slate-300 font-semibold">{r.leave_type}</span></div>
+                <div><span className="text-[#6B7280] block">Dates</span><span className="text-slate-300">{formatDate(r.start_date)} – {formatDate(r.end_date)}</span></div>
+                <div><span className="text-[#6B7280] block">Days</span><span className="text-slate-300 font-bold">{r.total_days}</span></div>
+              </div>
+              <p className="text-[11px] text-slate-400">{r.reason}</p>
+              {r.review_notes && <p className="text-[10px] text-[#6B7280]">Notes: {r.review_notes}</p>}
+              <div className="pt-1 flex justify-end border-t border-slate-800/40">{actions(r)}</div>
+            </div>
+          ))}
+        {!loading && requests.length === 0 && !error && (
+          <div className="dashboard-card rounded-lg">
+            <EmptyState icon={CalendarDays} title={`No ${statusFilter === 'ALL' ? '' : statusFilter.toLowerCase() + ' '}requests`} description="Employees submit leave requests from the Android app." compact />
+          </div>
+        )}
       </div>
 
-      {/* Requests Table */}
-      <div className="dashboard-card rounded-lg overflow-hidden border border-slate-700/40">
-        <div className="p-3 border-b border-slate-700/40 flex items-center justify-between">
-          <span className="font-semibold text-xs dashboard-strong">Leave Applications</span>
-          <span className="text-[11px] text-slate-400">{requests.length} Total</span>
+      {/* Desktop */}
+      <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
+        <div className="p-3 border-b border-slate-800/60 flex items-center justify-between">
+          <span className="font-semibold text-xs dashboard-strong">Leave requests</span>
+          <span className="text-[11px] text-[#6B7280]">{requests.length} shown</span>
         </div>
-
         {loading ? (
-          <div className="p-8 text-center text-xs text-slate-500">Loading leave records…</div>
+          <LoadingRows rows={4} />
         ) : requests.length === 0 ? (
-          <div className="p-8 text-center text-xs text-slate-500">No leave requests found.</div>
+          !error && (
+            <EmptyState
+              icon={CalendarDays}
+              title={`No ${statusFilter === 'ALL' ? '' : statusFilter.toLowerCase() + ' '}requests`}
+              description="Employees submit leave requests from the Android app; they show up here for review."
+            />
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-slate-800 bg-slate-900/40 text-[10px] text-[#6B7280] uppercase tracking-wider">
-                  <th className="p-3 font-semibold">Employee</th>
-                  <th className="p-3 font-semibold">Type</th>
-                  <th className="p-3 font-semibold">Duration</th>
-                  <th className="p-3 font-semibold">Days</th>
-                  <th className="p-3 font-semibold">Reason</th>
-                  <th className="p-3 font-semibold">Status</th>
-                  <th className="p-3 font-semibold text-right">Actions</th>
+                <tr className={tableHeadRow}>
+                  <th className="px-3 py-2">Employee</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Dates</th>
+                  <th className="px-3 py-2">Days</th>
+                  <th className="px-3 py-2">Reason</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-slate-800/40">
                 {requests.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-800/20 transition">
-                    <td className="p-3 font-medium dashboard-strong">
+                  <tr key={r.id} className={tableRow}>
+                    <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold">
                           {r.user?.full_name?.charAt(0) || 'U'}
                         </div>
                         <div>
-                          <p className="leading-tight">{r.user?.full_name || 'Current User'}</p>
-                          <p className="text-[10px] text-slate-400">{r.user?.department?.name || 'Staff'}</p>
+                          <p className="leading-tight font-medium dashboard-strong">{r.user?.full_name || 'Employee'}</p>
+                          <p className="text-[10px] text-slate-400">{r.user?.department?.name || r.user?.designation || 'Staff'}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="p-3 font-semibold text-slate-300">{r.leave_type}</td>
-                    <td className="p-3 text-slate-300">
-                      {new Date(r.start_date).toLocaleDateString()} – {new Date(r.end_date).toLocaleDateString()}
+                    <td className="px-3 py-2 font-semibold text-slate-300">{r.leave_type}</td>
+                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{formatDate(r.start_date)} – {formatDate(r.end_date)}</td>
+                    <td className="px-3 py-2 font-bold text-slate-200">{r.total_days}</td>
+                    <td className="px-3 py-2 text-slate-400 max-w-xs">
+                      <p className="truncate" title={r.reason}>{r.reason}</p>
+                      {r.review_notes && <p className="text-[10px] text-[#6B7280] truncate" title={r.review_notes}>Notes: {r.review_notes}</p>}
                     </td>
-                    <td className="p-3 font-bold text-slate-200">{r.total_days}</td>
-                    <td className="p-3 text-slate-400 max-w-xs truncate" title={r.reason}>{r.reason}</td>
-                    <td className="p-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium ${statusBadge(r.status)}`}>
-                        {r.status === 'APPROVED' && <CheckCircle2 className="w-2.5 h-2.5" />}
-                        {r.status === 'REJECTED' && <XCircle className="w-2.5 h-2.5" />}
-                        {r.status === 'PENDING' && <Clock className="w-2.5 h-2.5" />}
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right">
-                      {r.status === 'PENDING' ? (
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleAction(r.id, 'APPROVE')}
-                            disabled={actionLoading === r.id}
-                            className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-[11px] font-medium transition"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleAction(r.id, 'REJECT')}
-                            disabled={actionLoading === r.id}
-                            className="px-2 py-1 rounded bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-[11px] font-medium transition"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-500">Processed</span>
-                      )}
-                    </td>
+                    <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
+                    <td className="px-3 py-2 text-right">{actions(r)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,80 +254,32 @@ export default function LeavesManagementPage() {
         )}
       </div>
 
-      {/* Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="dashboard-card bg-slate-900 border border-slate-700 rounded-xl p-5 max-w-md w-full shadow-2xl">
-            <h3 className="text-sm font-bold dashboard-strong mb-3">Submit Leave Request</h3>
-            <form onSubmit={handleCreateRequest} className="space-y-3">
-              <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Leave Type</label>
-                <select
-                  value={form.leave_type}
-                  onChange={(e) => setForm({ ...form, leave_type: e.target.value })}
-                  className="w-full p-2 rounded bg-slate-800 border border-slate-700 text-xs text-white"
-                >
-                  <option value="CASUAL">Casual Leave (Balance: {balances.casual ?? 6})</option>
-                  <option value="SICK">Sick Leave (Balance: {balances.sick ?? 6})</option>
-                  <option value="PAID">Paid Vacation (Balance: {balances.paid ?? 12})</option>
-                  <option value="UNPAID">Unpaid Absence</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={form.start_date}
-                    onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-700 text-xs text-white"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={form.end_date}
-                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-700 text-xs text-white"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Reason / Notes</label>
-                <textarea
-                  value={form.reason}
-                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                  placeholder="Reason for time off…"
-                  rows={3}
-                  className="w-full p-2 rounded bg-slate-800 border border-slate-700 text-xs text-white"
-                  required
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-3 py-1.5 rounded border border-slate-700 text-xs text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-xs font-semibold text-white"
-                >
-                  Submit Request
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={!!review}
+        onClose={() => !reviewing && setReview(null)}
+        title={review?.action === 'APPROVE' ? 'Approve leave' : 'Reject leave'}
+        description={
+          review
+            ? `${review.request.user?.full_name || 'Employee'} · ${review.request.leave_type} · ${formatDate(review.request.start_date)} – ${formatDate(review.request.end_date)} (${review.request.total_days} day${review.request.total_days === 1 ? '' : 's'})`
+            : undefined
+        }
+        size="sm"
+      >
+        <form onSubmit={submitReview} className="space-y-2.5" noValidate>
+          <p className="text-[11px] text-slate-400">Reason given: {review?.request.reason || '—'}</p>
+          <div>
+            <label htmlFor="review_notes" className={labelClass}>Notes for the employee <span className="font-normal text-slate-500">(optional)</span></label>
+            <textarea id="review_notes" rows={3} value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} placeholder={review?.action === 'REJECT' ? 'Why is this being rejected?' : 'Anything the employee should know'} className={inputClass} />
           </div>
-        </div>
-      )}
+          {reviewError && <p role="alert" className={errorText}>{reviewError}</p>}
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setReview(null)} disabled={reviewing} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={reviewing} className={review?.action === 'APPROVE' ? btnPrimary : btnDanger}>
+              {reviewing ? 'Saving…' : review?.action === 'APPROVE' ? 'Approve' : 'Reject'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

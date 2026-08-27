@@ -1,111 +1,126 @@
 import { z } from 'zod';
 
-export type TamperEventType = 'GPS_DISABLED' | 'PERMISSION_REVOKED' | 'MOCK_LOCATION_DETECTED';
+export type TamperEventType =
+  | 'GPS_DISABLED'
+  | 'PERMISSION_REVOKED'
+  | 'MOCK_LOCATION_DETECTED'
+  | 'FACE_MISMATCH'
+  | 'GEOFENCE_BREACH';
 
-export type SoundMode = 'NORMAL' | 'SILENT' | 'VIBRATE' | 'DND';
 export type BatteryState = 'CHARGING' | 'DISCHARGING' | 'FULL';
-export type BatteryHealthState = 'GOOD' | 'NORMAL' | 'OVERHEAT' | 'DEGRADED';
 
+/**
+ * Work-readiness telemetry collected by the Android app.
+ * Only signals with a workforce purpose are collected (battery, power-save, GPS state, mock location).
+ */
 export interface DeviceTelemetry {
-  // Live Battery Status
   battery_level: number; // 0 - 100%
-  battery_status: BatteryState; // CHARGING / DISCHARGING / FULL
-  battery_health?: BatteryHealthState; // GOOD / NORMAL
-  battery_temperature?: number; // e.g. 32.4 °C
-  battery_power_save?: boolean; // Power saving mode
-
-  // Sound Tracking
-  sound_volume?: number; // 0 - 100%
-  sound_mode?: SoundMode; // NORMAL / SILENT / VIBRATE / DND
-
-  // Brightness Tracking
-  brightness_level?: number; // 0 - 100%
-  brightness_auto?: boolean; // Auto/Adaptive brightness
-
-  // Storage Tracking
-  storage_used_gb?: number; // e.g. 58.4 GB
-  storage_total_gb?: number; // e.g. 128.0 GB
-  storage_free_gb?: number; // e.g. 69.6 GB
-  storage_free_pct?: number; // e.g. 54.4%
-
-  // RAM Tracking
-  ram_used_gb?: number; // e.g. 4.6 GB
-  ram_total_gb?: number; // e.g. 8.0 GB
-  ram_usage_pct?: number; // e.g. 57.5%
-
-  // Work-readiness signals collected by the Android app and shown only to management.
+  battery_status?: BatteryState;
+  battery_power_save?: boolean;
   developer_options_enabled?: boolean;
   location_services_enabled?: boolean;
   location_permission_granted?: boolean;
+  background_location_permission_granted?: boolean;
   mock_location_detected?: boolean;
-
-  updated_at: string;
+  app_version?: string;
+  updated_at?: string;
 }
 
 export const DeviceTelemetrySchema = z.object({
   battery_level: z.number().min(0).max(100),
-  battery_status: z.enum(['CHARGING', 'DISCHARGING', 'FULL']).default('DISCHARGING'),
-  battery_health: z.enum(['GOOD', 'NORMAL', 'OVERHEAT', 'DEGRADED']).optional(),
-  battery_temperature: z.number().optional(),
+  battery_status: z.enum(['CHARGING', 'DISCHARGING', 'FULL']).optional(),
   battery_power_save: z.boolean().optional(),
-  sound_volume: z.number().min(0).max(100).optional(),
-  sound_mode: z.enum(['NORMAL', 'SILENT', 'VIBRATE', 'DND']).optional(),
-  brightness_level: z.number().min(0).max(100).optional(),
-  brightness_auto: z.boolean().optional(),
-  storage_used_gb: z.number().optional(),
-  storage_total_gb: z.number().optional(),
-  storage_free_gb: z.number().optional(),
-  storage_free_pct: z.number().optional(),
-  ram_used_gb: z.number().optional(),
-  ram_total_gb: z.number().optional(),
-  ram_usage_pct: z.number().optional(),
   developer_options_enabled: z.boolean().optional(),
   location_services_enabled: z.boolean().optional(),
   location_permission_granted: z.boolean().optional(),
+  background_location_permission_granted: z.boolean().optional(),
   mock_location_detected: z.boolean().optional(),
-  updated_at: z.string().optional(),
+  app_version: z.string().max(40).optional(),
+  updated_at: z.string().max(64).optional(),
 });
 
-export const LocationPingSchema = z.object({
+export const DeviceInfoSchema = z.object({
+  device_model: z.string().max(160).optional(),
+  os_version: z.string().max(80).optional(),
+});
+
+export const WaypointSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
-  altitude: z.number().nullable().optional(),
-  accuracy: z.number(),
-  speed: z.number().nullable().optional(),
-  heading: z.number().nullable().optional(),
-  battery_level: z.number().min(0).max(100).optional(),
-  telemetry: DeviceTelemetrySchema.optional(),
-  is_mock: z.boolean().default(false),
-  timestamp: z.string(), // ISO string
+  accuracy: z.number().min(0).max(10000).optional(),
+  speed: z.number().min(0).max(150).optional(), // m/s
+  heading: z.number().min(0).max(360).optional(),
+  recorded_at: z.string().datetime({ offset: true }).optional(),
 });
-export type LocationPingDto = z.infer<typeof LocationPingSchema>;
+export type WaypointDto = z.infer<typeof WaypointSchema>;
 
-export const BatchLocationSyncSchema = z.object({
-  attendance_id: z.string().uuid(),
-  device_uuid: z.string().min(1),
-  pings: z.array(LocationPingSchema).min(1),
-});
-export type BatchLocationSyncDto = z.infer<typeof BatchLocationSyncSchema>;
+export interface LocationPingDto {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: string;
+  speed?: number;
+  heading?: number;
+}
 
-export const ReportTamperSchema = z.object({
-  attendance_id: z.string().uuid().optional(),
-  event_type: z.enum(['GPS_DISABLED', 'PERMISSION_REVOKED', 'MOCK_LOCATION_DETECTED']),
-  details: z.string().optional(),
-  timestamp: z.string(),
+export const WaypointBatchSchema = z.object({
+  waypoints: z.array(WaypointSchema).min(1).max(500),
 });
-export type ReportTamperDto = z.infer<typeof ReportTamperSchema>;
+
+export const IntegritySchema = z.object({
+  location_permission_granted: z.boolean(),
+  background_location_permission_granted: z.boolean().optional(),
+  location_services_enabled: z.boolean(),
+  battery_power_save: z.boolean(),
+  battery_level: z.number().min(0).max(100),
+  mock_location_detected: z.boolean(),
+  developer_options_enabled: z.boolean().optional(),
+});
+export type IntegrityDto = z.infer<typeof IntegritySchema>;
+
+export const MobileCheckInSchema = z.object({
+  action: z.literal('check_in'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(10000).optional(),
+  integrity: IntegritySchema,
+});
+export const MobileStartBreakSchema = z.object({
+  action: z.literal('start_break'),
+  break_type: z.enum(['LUNCH', 'TEA', 'GENERAL']).optional(),
+});
+export const MobileResumeSchema = z.object({
+  action: z.literal('resume'),
+  integrity: IntegritySchema,
+});
+export const MobileCheckOutSchema = z.object({
+  action: z.literal('check_out'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(10000).optional(),
+});
+export const MobileAttendanceActionSchema = z.discriminatedUnion('action', [
+  MobileCheckInSchema,
+  MobileStartBreakSchema,
+  MobileResumeSchema,
+  MobileCheckOutSchema,
+]);
+
+export type LiveShiftStatus = 'CHECKED_IN' | 'ON_BREAK' | 'CHECKED_OUT' | 'OFF_DUTY';
 
 export interface LiveTeamMember {
   user_id: string;
   full_name: string;
   designation: string;
   department_name?: string;
-  shift_status: 'CHECKED_IN' | 'ON_BREAK' | 'CHECKED_OUT' | 'OFF_DUTY';
+  shift_status: LiveShiftStatus;
+  punch_in_time: string | null;
+  punch_out_time: string | null;
   current_location?: {
     latitude: number;
     longitude: number;
     accuracy: number;
-    speed: number;
+    speed: number; // m/s
     heading: number;
     address_name?: string;
     last_ping_at: string;
@@ -117,7 +132,10 @@ export interface LiveTeamMember {
   device_model?: string;
   device_uuid?: string;
   gps_enabled: boolean;
+  is_gps_disconnected: boolean;
+  seconds_since_last_ping: number | null;
   has_tamper_alert: boolean;
+  tamper_reason: string | null;
 }
 
 export interface RouteTimelineStop {

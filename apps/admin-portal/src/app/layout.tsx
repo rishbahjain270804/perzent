@@ -1,11 +1,18 @@
-import type { Metadata } from 'next';
-import Script from 'next/script';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import 'leaflet/dist/leaflet.css';
 
 export const metadata: Metadata = {
-  title: 'Perzent - Multi-App Workforce Tracking & Attendance',
-  description: 'Enterprise Employee Live Tracking, Dwell-Time Analysis & Shift Attendance Platform',
+  title: 'Perzent — Field Attendance & Live Location',
+  description:
+    'GPS-stamped attendance, live team map, route history and timesheets for field teams. Free launch plan with unlimited seats.',
+  applicationName: 'Perzent',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -15,9 +22,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <Script src="https://sdk.cashfree.com/js/v3/cashfree.js" strategy="lazyOnload" />
-      </head>
       <body className="antialiased min-h-screen bg-slate-50 text-slate-900">
         {children}
       </body>

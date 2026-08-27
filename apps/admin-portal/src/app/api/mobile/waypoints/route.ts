@@ -1,77 +1,86 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
-import { authErrorResponse, requireSession } from '@/lib/auth';
+import { SYSTEM_CONFIG, WaypointBatchSchema } from '@perzent/shared-types';
+import { findOpenAttendance } from '@/lib/attendance';
+import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
+import { enforceCompanyPolicies } from '@/lib/policy';
 
 export const dynamic = 'force-dynamic';
 
-const todayIst = () => {
-  const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-  return new Date(`${istDateStr}T00:00:00.000Z`);
-};
+const secondKey = (date: Date) => Math.floor(date.getTime() / 1000);
 
 export async function POST(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
-    const body = await request.json();
-    const workDate = todayIst();
+    const raw = await request.json();
+    const parsed = WaypointBatchSchema.parse(Array.isArray(raw?.waypoints) ? raw : { waypoints: [raw] });
 
-    let attendance = await prisma.attendanceRecord.findUnique({
-      where: {
-        user_id_work_date: {
-          user_id: session.userId,
-          work_date: workDate,
-        },
-      },
-    });
-
+    await enforceCompanyPolicies(session.companyId);
+    const attendance = await findOpenAttendance(session.userId);
     if (!attendance) {
-      attendance = await prisma.attendanceRecord.findFirst({
-        where: {
-          user_id: session.userId,
-          status: { in: ['CHECKED_IN', 'ON_BREAK'] },
-        },
-        orderBy: { punch_in_time: 'desc' },
-      });
+      return jsonError('No active shift. Tracking has been stopped.', 409, 'NO_ACTIVE_SHIFT');
     }
 
-    if (!attendance || ['CHECKED_OUT', 'AUTO_CHECKED_OUT'].includes(attendance.status)) {
-      return NextResponse.json({ error: 'No active attendance session for today' }, { status: 409 });
-    }
+    const now = Date.now();
+    const oldest = now - SYSTEM_CONFIG.MAX_WAYPOINT_AGE_DAYS * 86400000;
+    const newest = now + SYSTEM_CONFIG.MAX_WAYPOINT_FUTURE_SKEW_MS;
+    const notBefore = attendance.punch_in_time.getTime() - 60_000;
 
-    const rawPoints = Array.isArray(body.waypoints) ? body.waypoints : [body];
-    const points = rawPoints
-      .filter((point: any) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude))
-      .map((point: any) => ({
+    const seen = new Set<number>();
+    const candidates = parsed.waypoints
+      .map((point) => ({
         attendance_id: attendance.id,
         user_id: session.userId,
         latitude: point.latitude,
         longitude: point.longitude,
-        accuracy: Number.isFinite(point.accuracy) ? point.accuracy : 0,
-        speed: Number.isFinite(point.speed) ? point.speed : 0,
-        heading: Number.isFinite(point.heading) ? point.heading : 0,
+        accuracy: point.accuracy ?? 50,
+        speed: point.speed ?? 0,
+        heading: point.heading === 360 ? 0 : point.heading ?? 0,
         recorded_at: point.recorded_at ? new Date(point.recorded_at) : new Date(),
       }))
-      .filter((point: any) => !Number.isNaN(point.recorded_at.getTime()));
+      .filter((point) => !Number.isNaN(point.recorded_at.getTime()))
+      .filter((point) => {
+        const t = point.recorded_at.getTime();
+        return t >= oldest && t <= newest && t >= notBefore;
+      })
+      .filter((point) => point.accuracy <= SYSTEM_CONFIG.MAX_ACCEPTED_ACCURACY_METERS)
+      .filter((point) => {
+        const key = secondKey(point.recorded_at);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.recorded_at.getTime() - b.recorded_at.getTime());
 
-    if (points.length === 0) {
-      return NextResponse.json({ error: 'At least one valid GPS waypoint is required' }, { status: 400 });
+    let fresh = candidates;
+    if (candidates.length > 0) {
+      const existing = await prisma.locationWaypoint.findMany({
+        where: {
+          attendance_id: attendance.id,
+          recorded_at: { gte: candidates[0].recorded_at, lte: candidates[candidates.length - 1].recorded_at },
+        },
+        select: { recorded_at: true },
+      });
+      const existingKeys = new Set(existing.map((row) => secondKey(row.recorded_at)));
+      fresh = candidates.filter((point) => !existingKeys.has(secondKey(point.recorded_at)));
     }
 
-    const [created] = await prisma.$transaction([
-      prisma.locationWaypoint.createMany({ data: points }),
-      prisma.userDevice.updateMany({
-        where: { user_id: session.userId, is_active: true },
-        data: { last_seen_at: new Date() },
-      }),
-    ]);
-
-    const total = await prisma.locationWaypoint.count({
-      where: { attendance_id: attendance.id },
-    });
+    let ingested = 0;
+    if (fresh.length > 0) {
+      const [created] = await prisma.$transaction([
+        prisma.locationWaypoint.createMany({ data: fresh }),
+        prisma.userDevice.updateMany({ where: { user_id: session.userId, is_active: true }, data: { last_seen_at: new Date() } }),
+      ]);
+      ingested = created.count;
+    } else {
+      await prisma.userDevice.updateMany({ where: { user_id: session.userId, is_active: true }, data: { last_seen_at: new Date() } });
+    }
 
     return NextResponse.json({
-      ingested: created.count,
-      total_waypoints: total,
+      ingested,
+      dropped: parsed.waypoints.length - ingested,
+      attendance_id: attendance.id,
+      shift_status: attendance.status,
       server_time: new Date().toISOString(),
     });
   } catch (error) {
@@ -82,13 +91,12 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['EMPLOYEE', 'MANAGER']);
-    const workDate = todayIst();
+    const attendance = await findOpenAttendance(session.userId);
+    if (!attendance) return NextResponse.json({ count: 0, waypoints: [] });
     const waypoints = await prisma.locationWaypoint.findMany({
-      where: {
-        user_id: session.userId,
-        recorded_at: { gte: workDate },
-      },
+      where: { attendance_id: attendance.id },
       orderBy: { recorded_at: 'asc' },
+      select: { id: true, latitude: true, longitude: true, accuracy: true, speed: true, heading: true, recorded_at: true },
     });
     return NextResponse.json({ count: waypoints.length, waypoints });
   } catch (error) {

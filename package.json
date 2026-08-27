@@ -9,17 +9,20 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "db:generate": "pnpm --filter @perzent/database generate",
     "db:push": "pnpm --filter @perzent/database push",
-    "db:seed": "pnpm --filter @perzent/database seed"
-  },
-  "dependencies": {
-    "next": "^15.2.3",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "db:migrate": "pnpm --filter @perzent/database migrate:deploy",
+    "db:migrate:status": "pnpm --filter @perzent/database migrate:status",
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "turbo": "^2.4.4",
     "typescript": "^5.7.3",
     "prettier": "^3.5.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "^19.0.10",
+      "@types/react-dom": "^19.0.4"
+    }
   },
   "packageManager": "pnpm@10.14.0"
 }

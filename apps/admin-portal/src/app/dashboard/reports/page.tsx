@@ -1,134 +1,119 @@
 'use client';
-import { useState, useEffect } from 'react';
-import {
-  BarChart3,
-  CheckCircle,
-  AlertTriangle,
-  Clock,
-  Users,
-  Briefcase,
-  RefreshCw,
-  TrendingUp,
-} from 'lucide-react';
+
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Clock, Briefcase, RefreshCw, TrendingUp, BarChart3 } from 'lucide-react';
+import { apiFetch, errorMessage } from '@/lib/client';
+import { PageHeader, StatCard, EmptyState, ErrorBanner, LoadingRows, useSession, inputClass, iconBtn } from '@/components';
+
+interface DepartmentStat {
+  name: string;
+  total_hours: number;
+  punches: number;
+  late_punches: number;
+}
+
+interface AnalyticsResponse {
+  punctuality_rate_percentage: number;
+  on_time_shifts: number;
+  late_shifts: number;
+  total_hours_worked: number;
+  average_shift_hours: number;
+  total_approved_leaves: number;
+  department_breakdown?: DepartmentStat[];
+}
+
+const RANGES = [
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+  { value: '90', label: 'Last 90 days' },
+];
 
 export default function ReportsAnalyticsPage() {
-  const [data, setData] = useState<any>(null);
+  const { session } = useSession();
+  const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [days, setDays] = useState('30');
 
-  const fetchAnalytics = () => {
+  const fetchAnalytics = useCallback(async () => {
     setLoading(true);
-    fetch(`/api/reports/analytics?days=${days}`)
-      .then((res) => res.json())
-      .then((res) => {
-        setData(res);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
+    try {
+      const result = await apiFetch<AnalyticsResponse>(`/api/reports/analytics?days=${days}`);
+      setData(result);
+      setError('');
+    } catch (reason) {
+      setError(errorMessage(reason, 'Could not load analytics.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
 
   useEffect(() => {
     fetchAnalytics();
-  }, [days]);
+  }, [fetchAnalytics]);
+
+  const departments = data?.department_breakdown || [];
+  const timeZone = session?.company?.timezone;
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-base md:text-lg font-bold dashboard-strong tracking-tight">Reports & Attendance Analytics</h1>
-          <p className="text-xs text-[#6B7280]">Punctuality patterns, late clock-ins, and labor productivity breakdown</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-            className="p-1.5 rounded bg-slate-800 border border-slate-700 text-xs text-white"
-          >
-            <option value="7">Last 7 Days</option>
-            <option value="15">Last 15 Days</option>
-            <option value="30">Last 30 Days</option>
-            <option value="90">Last 90 Days</option>
-          </select>
-          <button
-            onClick={fetchAnalytics}
-            className="p-2 rounded border border-slate-700 text-slate-400 hover:text-white transition"
-            title="Refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
+      <PageHeader
+        title="Reports"
+        description={`Punctuality, hours and leave for the selected period. Late = check-in after 09:30 company time${timeZone ? ` (${timeZone})` : ''}.`}
+        actions={
+          <>
+            <select value={days} onChange={(e) => setDays(e.target.value)} className={inputClass} aria-label="Period">
+              {RANGES.map((range) => (
+                <option key={range.value} value={range.value}>{range.label}</option>
+              ))}
+            </select>
+            <button onClick={fetchAnalytics} disabled={loading} className={iconBtn} title="Refresh" aria-label="Refresh">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </>
+        }
+      />
 
-      {loading || !data ? (
-        <div className="p-12 text-center text-xs text-slate-500">Generating analytics metrics…</div>
+      <ErrorBanner message={error} onRetry={fetchAnalytics} retrying={loading} />
+
+      {loading && !data ? (
+        <div className="dashboard-card rounded-lg"><LoadingRows rows={4} label="Calculating" /></div>
+      ) : !data ? (
+        !error && <div className="dashboard-card rounded-lg"><EmptyState icon={BarChart3} title="No data yet" description="Reports fill in once employees start checking in." /></div>
       ) : (
         <>
-          {/* Key Metrics Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Punctuality Rate</span>
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-              </div>
-              <p className="text-2xl font-bold text-emerald-400">{data.punctuality_rate_percentage}%</p>
-              <p className="text-[10px] text-slate-400 mt-1">{data.on_time_shifts} on-time shifts</p>
-            </div>
-
-            <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Late Clock-ins</span>
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              </div>
-              <p className="text-2xl font-bold text-amber-400">{data.late_shifts}</p>
-              <p className="text-[10px] text-slate-400 mt-1">Past 9:30 AM IST</p>
-            </div>
-
-            <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Total Hours Worked</span>
-                <Clock className="w-3.5 h-3.5 text-cyan-400" />
-              </div>
-              <p className="text-2xl font-bold text-cyan-400">{data.total_hours_worked} <span className="text-xs font-normal text-slate-400">hrs</span></p>
-              <p className="text-[10px] text-slate-400 mt-1">Avg {data.average_shift_hours} hrs / shift</p>
-            </div>
-
-            <div className="dashboard-card p-3 rounded-lg border border-slate-700/40">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-[#6B7280] uppercase tracking-wider font-semibold">Approved Leaves</span>
-                <Briefcase className="w-3.5 h-3.5 text-slate-300" />
-              </div>
-              <p className="text-2xl font-bold text-slate-200">{data.total_approved_leaves}</p>
-              <p className="text-[10px] text-slate-400 mt-1">Recorded PTO</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <StatCard label="Punctuality" value={`${data.punctuality_rate_percentage}%`} icon={TrendingUp} tone="success" hint={`${data.on_time_shifts} on-time shifts`} />
+            <StatCard label="Late check-ins" value={data.late_shifts} icon={AlertTriangle} tone={data.late_shifts > 0 ? 'warning' : 'default'} hint="After 09:30 company time" />
+            <StatCard label="Hours worked" value={data.total_hours_worked} icon={Clock} tone="info" hint={`Avg ${data.average_shift_hours} h / shift`} />
+            <StatCard label="Approved leaves" value={data.total_approved_leaves} icon={Briefcase} hint="In this period" />
           </div>
 
-          {/* Department Breakdown */}
-          <div className="dashboard-card rounded-lg p-4 border border-slate-700/40">
-            <h3 className="text-xs font-bold dashboard-strong mb-3">Department Productivity & Punctuality</h3>
-            <div className="space-y-3">
-              {data.department_breakdown?.map((dept: any) => {
-                const onTimeRate = dept.punches > 0 ? Math.round(((dept.punches - dept.late_punches) / dept.punches) * 100) : 100;
-                return (
-                  <div key={dept.name} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium dashboard-strong">{dept.name}</span>
-                      <span className="text-slate-400">{dept.total_hours} hrs • {dept.punches} shifts ({onTimeRate}% on-time)</span>
+          <div className="dashboard-card rounded-lg p-4">
+            <h3 className="text-xs font-bold dashboard-strong mb-3">Departments — hours and on-time rate</h3>
+            {departments.length === 0 ? (
+              <EmptyState icon={BarChart3} title="No shifts in this period" description="Department figures appear once shifts are recorded." compact />
+            ) : (
+              <div className="space-y-3">
+                {departments.map((dept) => {
+                  const onTimeRate = dept.punches > 0 ? Math.round(((dept.punches - dept.late_punches) / dept.punches) * 100) : 100;
+                  return (
+                    <div key={dept.name} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-medium dashboard-strong truncate">{dept.name}</span>
+                        <span className="text-slate-400 text-[11px] shrink-0">
+                          {dept.total_hours.toFixed(1)} h · {dept.punches} shift{dept.punches === 1 ? '' : 's'} · {onTimeRate}% on time
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex" role="img" aria-label={`${onTimeRate}% on time`}>
+                        <div className="bg-emerald-500 h-full transition-all motion-reduce:transition-none" style={{ width: `${onTimeRate}%` }} />
+                        <div className="bg-amber-500 h-full transition-all motion-reduce:transition-none" style={{ width: `${100 - onTimeRate}%` }} />
+                      </div>
                     </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex">
-                      <div
-                        className="bg-emerald-500 h-full rounded-full transition-all"
-                        style={{ width: `${onTimeRate}%` }}
-                      />
-                      <div
-                        className="bg-amber-500 h-full rounded-full transition-all"
-                        style={{ width: `${100 - onTimeRate}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
       )}

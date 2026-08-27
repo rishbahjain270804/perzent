@@ -1,459 +1,487 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarCheck, UserCheck, Coffee, RefreshCw, LogOut, Info } from 'lucide-react';
+import { apiFetch, errorMessage, formatTime, todayInTimezone, shiftDate, minutesToHours } from '@/lib/client';
 import {
-  CalendarCheck,
-  UserCheck,
-  Coffee,
-  X,
-  RefreshCw,
-  Search,
-} from 'lucide-react';
-import { AttendanceSummary } from '@perzent/shared-types';
+  PageHeader,
+  StatCard,
+  StatusBadge,
+  Modal,
+  SearchBar,
+  EmptyState,
+  ErrorBanner,
+  LoadingRows,
+  Notice,
+  useSession,
+  inputClass,
+  labelClass,
+  helpClass,
+  btnPrimary,
+  btnSecondary,
+  btnDanger,
+  btnGhost,
+  iconBtn,
+  errorText,
+  tableHeadRow,
+  tableRow,
+} from '@/components';
+
+type AttendanceStatus = 'CHECKED_IN' | 'ON_BREAK' | 'CHECKED_OUT' | 'AUTO_CHECKED_OUT';
+
+interface AttendanceRecord {
+  id: string;
+  user_id: string;
+  user_name: string;
+  work_date: string;
+  punch_in_time: string;
+  punch_out_time?: string | null;
+  punch_in_by?: string | null;
+  punch_out_by?: string | null;
+  override_reason?: string | null;
+  status: AttendanceStatus;
+  gross_worked_minutes: number;
+  total_break_minutes: number;
+  net_worked_minutes: number;
+}
+
+interface EmployeeOption {
+  id: string;
+  full_name: string;
+  phone: string;
+  status?: string;
+}
+
+const isOpenShift = (status: AttendanceStatus) => status === 'CHECKED_IN' || status === 'ON_BREAK';
 
 export default function AttendancePage() {
-  const [records, setRecords] = useState<AttendanceSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { session } = useSession();
+  const company = session?.company;
+  const timeZone = company?.timezone;
+
+  const [from, setFrom] = useState(() => shiftDate(todayInTimezone(), -6));
+  const [to, setTo] = useState(() => todayInTimezone());
+  const [userFilter, setUserFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [employees, setEmployees] = useState<any[]>([]);
 
-  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<AttendanceSummary | null>(null);
-  const [overrideTime, setOverrideTime] = useState('14:00');
-  const [overrideReason, setOverrideReason] = useState('Left office early for personal appointment');
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [notice, setNotice] = useState('');
 
-  const [showCheckInModal, setShowCheckInModal] = useState(false);
+  // Force check-out
+  const [checkoutTarget, setCheckoutTarget] = useState<AttendanceRecord | null>(null);
+  const [overrideTime, setOverrideTime] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
+  const [checkingOut, setCheckingOut] = useState(false);
+
+  // Manual check-in
+  const [checkInOpen, setCheckInOpen] = useState(false);
   const [manualUserId, setManualUserId] = useState('');
-  const [manualTime, setManualTime] = useState('09:00');
-  const [manualReason, setManualReason] = useState('Phone battery discharged in morning');
+  const [manualDate, setManualDate] = useState('');
+  const [manualTime, setManualTime] = useState('');
+  const [manualReason, setManualReason] = useState('');
+  const [checkInError, setCheckInError] = useState('');
+  const [checkingIn, setCheckingIn] = useState(false);
 
-  const fetchAttendance = () => {
+  const rangeError = from && to && from > to ? '"From" must be on or before "To".' : '';
+
+  const fetchAttendance = useCallback(async () => {
+    if (rangeError) return;
     setLoading(true);
-    fetch('/api/attendance')
-      .then((res) => res.json())
-      .then((data) => {
-        setRecords(Array.isArray(data) ? data : []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
+    try {
+      const params = new URLSearchParams({ from, to });
+      if (userFilter) params.set('user_id', userFilter);
+      const data = await apiFetch<AttendanceRecord[]>(`/api/attendance?${params.toString()}`);
+      setRecords(Array.isArray(data) ? data : []);
+      setError('');
+    } catch (reason) {
+      setError(errorMessage(reason, 'Could not load attendance.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [from, to, userFilter, rangeError]);
 
   useEffect(() => {
     fetchAttendance();
-    fetch('/api/employees')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setEmployees(data);
-          setManualUserId(data[0]?.id || '');
-        }
-      });
+  }, [fetchAttendance]);
+
+  useEffect(() => {
+    apiFetch<EmployeeOption[]>('/api/employees')
+      .then((data) => setEmployees(Array.isArray(data) ? data : []))
+      .catch(() => setEmployees([]));
   }, []);
 
-  const handleForceCheckout = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRecord) return;
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
-    await fetch('/api/attendance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'force_checkout',
-        attendance_id: selectedRecord.id,
-        override_time: overrideTime,
-        reason: overrideReason,
-      }),
-    });
+  const filteredRecords = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((r) => r.user_name?.toLowerCase().includes(q) || r.work_date?.includes(q));
+  }, [records, searchQuery]);
 
-    setShowCheckoutModal(false);
-    fetchAttendance();
+  const stats = {
+    total: records.length,
+    inProgress: records.filter((r) => isOpenShift(r.status)).length,
+    completed: records.filter((r) => r.status === 'CHECKED_OUT').length,
+    auto: records.filter((r) => r.status === 'AUTO_CHECKED_OUT').length,
   };
 
-  const handleManualCheckIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await fetch('/api/attendance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'manual_checkin',
-        user_id: manualUserId,
-        check_in_time: new Date(`${new Date().toISOString().slice(0, 10)}T${manualTime}:00+05:30`).toISOString(),
-        reason: manualReason,
-      }),
-    });
-
-    setShowCheckInModal(false);
-    fetchAttendance();
+  const openCheckout = (record: AttendanceRecord) => {
+    setCheckoutTarget(record);
+    setOverrideTime('');
+    setOverrideReason('');
+    setCheckoutError('');
   };
 
-  const filteredRecords = records.filter(
-    (r) =>
-      r.user_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.work_date?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleForceCheckout = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!checkoutTarget) return;
+    if (overrideReason.trim().length < 3) {
+      setCheckoutError('Enter a reason for the audit trail (at least 3 characters).');
+      return;
+    }
+    setCheckingOut(true);
+    setCheckoutError('');
+    try {
+      await apiFetch('/api/attendance', {
+        method: 'POST',
+        json: {
+          action: 'force_checkout',
+          attendance_id: checkoutTarget.id,
+          reason: overrideReason.trim(),
+          ...(overrideTime ? { override_time: overrideTime } : {}),
+        },
+      });
+      setNotice(`${checkoutTarget.user_name} checked out${overrideTime ? ` at ${overrideTime}` : ''}.`);
+      setCheckoutTarget(null);
+      fetchAttendance();
+    } catch (reason) {
+      setCheckoutError(errorMessage(reason, 'Could not check out this shift.'));
+    } finally {
+      setCheckingOut(false);
+    }
+  };
+
+  const openCheckIn = () => {
+    setManualUserId(userFilter || employees[0]?.id || '');
+    setManualDate(todayInTimezone(timeZone));
+    setManualTime('');
+    setManualReason('');
+    setCheckInError('');
+    setCheckInOpen(true);
+  };
+
+  const handleManualCheckIn = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!manualUserId) {
+      setCheckInError('Choose an employee.');
+      return;
+    }
+    if (!manualTime) {
+      setCheckInError('Enter the check-in time.');
+      return;
+    }
+    if (manualReason.trim().length < 3) {
+      setCheckInError('Enter a reason for the audit trail (at least 3 characters).');
+      return;
+    }
+    setCheckingIn(true);
+    setCheckInError('');
+    try {
+      await apiFetch('/api/attendance', {
+        method: 'POST',
+        json: {
+          action: 'manual_checkin',
+          user_id: manualUserId,
+          work_date: manualDate,
+          check_in_time: manualTime,
+          reason: manualReason.trim(),
+        },
+      });
+      const name = employees.find((e) => e.id === manualUserId)?.full_name || 'Employee';
+      setNotice(`${name} checked in at ${manualTime} on ${manualDate}.`);
+      setCheckInOpen(false);
+      fetchAttendance();
+    } catch (reason) {
+      setCheckInError(errorMessage(reason, 'Could not record the check-in.'));
+    } finally {
+      setCheckingIn(false);
+    }
+  };
+
+  const punchOutCell = (record: AttendanceRecord) => {
+    if (record.punch_out_time) return formatTime(record.punch_out_time, timeZone);
+    if (record.status === 'AUTO_CHECKED_OUT') return `${company?.auto_checkout_time || '—'} (auto)`;
+    return <span className="text-[#86EFAC]">In progress</span>;
+  };
+
+  const punchMeta = (record: AttendanceRecord) => {
+    const bits: string[] = [];
+    if (record.punch_in_by && record.punch_in_by !== 'EMPLOYEE') bits.push(`in by ${record.punch_in_by.toLowerCase()}`);
+    if (record.punch_out_by && record.punch_out_by !== 'EMPLOYEE' && record.punch_out_by !== 'AUTO_SYSTEM') bits.push(`out by ${record.punch_out_by.toLowerCase()}`);
+    if (bits.length === 0) return null;
+    return (
+      <p className="text-[10px] text-[#6B7280]" title={record.override_reason || undefined}>
+        {bits.join(' · ')}{record.override_reason ? ' · reason on file' : ''}
+      </p>
+    );
+  };
+
+  const today = todayInTimezone(timeZone);
 
   return (
-    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
+      <PageHeader
+        title="Attendance"
+        description={
+          company
+            ? `Auto check-out at ${company.auto_checkout_time} (${company.timezone}) · records kept ${company.attendance_retention_days} days`
+            : 'Shift records with gross and net hours'
+        }
+        actions={
+          <>
+            <button onClick={fetchAttendance} disabled={loading} className={iconBtn} title="Refresh" aria-label="Refresh">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={openCheckIn} className={btnPrimary}>
+              <UserCheck className="w-3.5 h-3.5" /> Manual check-in
+            </button>
+          </>
+        }
+      />
+
+      {notice && <Notice onDismiss={() => setNotice('')}>{notice}</Notice>}
+      <ErrorBanner message={error} onRetry={fetchAttendance} retrying={loading} />
+
+      {/* Filters */}
+      <div className="dashboard-card rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
         <div>
-          <h1 className="text-sm md:text-base font-bold dashboard-strong tracking-tight">Attendance & Timesheets</h1>
-          <p className="text-[10px] md:text-[11px] text-[#6B7280]">
-            Auditable records • Gross vs net work hours • Break deductions
-          </p>
+          <label htmlFor="from" className={labelClass}>From</label>
+          <input id="from" type="date" value={from} max={to || today} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </div>
-        <div className="flex items-center gap-1.5 self-start sm:self-auto">
-          <button
-            onClick={fetchAttendance}
-            className="p-1.5 rounded border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white transition"
-            title="Refresh"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setShowCheckInModal(true)}
-            className="px-2.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
-          >
-            <UserCheck className="w-3.5 h-3.5" /> Manual Check-In
-          </button>
+        <div>
+          <label htmlFor="to" className={labelClass}>To</label>
+          <input id="to" type="date" value={to} min={from} max={today} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </div>
+        <div className="col-span-2">
+          <label htmlFor="employee" className={labelClass}>Employee</label>
+          <select id="employee" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className={inputClass}>
+            <option value="">All employees</option>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>{emp.full_name}</option>
+            ))}
+          </select>
+        </div>
+        {rangeError && <p className={`${errorText} col-span-full`}>{rangeError}</p>}
       </div>
 
-      {/* 4-Cell Metric Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-[#6B7280] text-[10px] uppercase font-semibold">Today's Shifts</span>
-          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">{records.length}</p>
-          <span className="text-[10px] text-[#6B7280]">Punched logs</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-emerald-400 text-[10px] uppercase font-semibold">In Progress</span>
-          <p className="text-lg md:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums">
-            {records.filter((r) => r.status === 'CHECKED_IN' || r.status === 'ON_BREAK').length}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">Currently on duty</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-amber-400 text-[10px] uppercase font-semibold">Completed</span>
-          <p className="text-lg md:text-xl font-bold text-amber-400 mt-0.5 tabular-nums">
-            {records.filter((r) => r.status === 'CHECKED_OUT' || r.status === 'AUTO_CHECKED_OUT').length}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">Signed off</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-blue-400 text-[10px] uppercase font-semibold">Retention</span>
-          <p className="text-lg md:text-xl font-bold text-blue-400 mt-0.5 tabular-nums">45 Days</p>
-          <span className="text-[10px] text-[#6B7280]">Full audit trail</span>
-        </div>
+        <StatCard label="Shifts" value={stats.total} icon={CalendarCheck} hint={`${from} → ${to}`} />
+        <StatCard label="In progress" value={stats.inProgress} icon={UserCheck} tone="success" />
+        <StatCard label="Completed" value={stats.completed} icon={Coffee} tone="warning" />
+        <StatCard label="Auto checked-out" value={stats.auto} icon={LogOut} tone={stats.auto > 0 ? 'danger' : 'default'} hint="Forgot to check out" />
       </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search rep or date..."
-            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-700 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-          />
-        </div>
-        <span className="text-[10px] md:text-[11px] text-[#6B7280]">{filteredRecords.length} records</span>
-      </div>
+      <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="Filter by name or date…" meta={`${filteredRecords.length} records`} />
 
       {/* ─── Mobile Card List ─── */}
       <div className="md:hidden space-y-2">
-        {filteredRecords.map((rec) => {
-          const grossHours = (rec.gross_worked_minutes / 60).toFixed(1);
-          const netHours = (rec.net_worked_minutes / 60).toFixed(1);
-
-          return (
+        {loading && <div className="dashboard-card rounded-lg"><LoadingRows rows={3} /></div>}
+        {!loading &&
+          filteredRecords.map((rec) => (
             <div key={rec.id} className="dashboard-card rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-xs dashboard-strong">{rec.user_name}</p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold text-xs dashboard-strong truncate">{rec.user_name}</p>
                   <p className="font-mono text-[10px] text-[#6B7280]">{rec.work_date}</p>
                 </div>
-                {rec.status === 'CHECKED_IN' && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse"></span> Active
-                  </span>
-                )}
-                {rec.status === 'ON_BREAK' && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    <Coffee className="w-2.5 h-2.5" /> Lunch
-                  </span>
-                )}
-                {rec.status === 'CHECKED_OUT' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">
-                    Completed
-                  </span>
-                )}
-                {rec.status === 'AUTO_CHECKED_OUT' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400">
-                    Auto-Out
-                  </span>
-                )}
+                <StatusBadge status={rec.status} />
               </div>
-
-              <div className="grid grid-cols-3 gap-1 pt-2 border-t border-slate-800/60 text-[10px]">
+              <div className="grid grid-cols-4 gap-1 pt-2 border-t border-slate-800/60 text-[10px]">
                 <div>
-                  <span className="text-[#6B7280] block">In:</span>
-                  <span className="font-mono text-slate-300">
-                    {new Date(rec.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  <span className="text-[#6B7280] block">In</span>
+                  <span className="font-mono text-slate-300">{formatTime(rec.punch_in_time, timeZone)}</span>
                 </div>
                 <div>
-                  <span className="text-[#6B7280] block">Out:</span>
-                  <span className="font-mono text-slate-300">
-                    {rec.punch_out_time
-                      ? new Date(rec.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : '—'}
-                  </span>
+                  <span className="text-[#6B7280] block">Out</span>
+                  <span className="font-mono text-slate-300">{punchOutCell(rec)}</span>
                 </div>
                 <div>
-                  <span className="text-[#6B7280] block">Net:</span>
-                  <span className="font-mono font-bold text-emerald-400">{netHours}h</span>
+                  <span className="text-[#6B7280] block">Break</span>
+                  <span className="font-mono text-amber-400">{rec.total_break_minutes}m</span>
+                </div>
+                <div>
+                  <span className="text-[#6B7280] block">Net</span>
+                  <span className="font-mono font-bold text-emerald-400">{minutesToHours(rec.net_worked_minutes)}h</span>
                 </div>
               </div>
-
-              {(rec.status === 'CHECKED_IN' || rec.status === 'ON_BREAK') && (
+              {punchMeta(rec)}
+              {isOpenShift(rec.status) && (
                 <div className="pt-1 flex justify-end border-t border-slate-800/40">
-                  <button
-                    onClick={() => {
-                      setSelectedRecord(rec);
-                      setShowCheckoutModal(true);
-                    }}
-                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition"
-                  >
-                    Override Out
+                  <button onClick={() => openCheckout(rec)} className={btnGhost}>
+                    <LogOut className="w-3 h-3" /> Force check-out
                   </button>
                 </div>
               )}
             </div>
-          );
-        })}
-        {filteredRecords.length === 0 && !loading && (
-          <p className="text-center text-[#6B7280] text-[11px] py-8">No attendance records found.</p>
+          ))}
+        {!loading && filteredRecords.length === 0 && !error && (
+          <div className="dashboard-card rounded-lg">
+            <EmptyState icon={CalendarCheck} title="No attendance in this range" description="Widen the date range or pick another employee." compact />
+          </div>
         )}
       </div>
 
       {/* ─── Desktop Table ─── */}
       <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Representative</th>
-                <th className="px-3 py-2">Punch In</th>
-                <th className="px-3 py-2">Punch Out</th>
-                <th className="px-3 py-2">Gross (Hours)</th>
-                <th className="px-3 py-2">Break (Mins)</th>
-                <th className="px-3 py-2">Net Work</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/40">
-              {filteredRecords.map((rec) => {
-                const grossHours = (rec.gross_worked_minutes / 60).toFixed(1);
-                const netHours = (rec.net_worked_minutes / 60).toFixed(1);
-
-                return (
-                  <tr key={rec.id} className="hover:bg-slate-800/20 transition">
+        {loading ? (
+          <LoadingRows rows={5} />
+        ) : filteredRecords.length === 0 ? (
+          !error && (
+            <EmptyState
+              icon={CalendarCheck}
+              title="No attendance in this range"
+              description="Shifts appear here when employees check in on the app. Widen the date range or pick another employee."
+            />
+          )
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className={tableHeadRow}>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Employee</th>
+                  <th className="px-3 py-2">In</th>
+                  <th className="px-3 py-2">Out</th>
+                  <th className="px-3 py-2">Gross</th>
+                  <th className="px-3 py-2">Break</th>
+                  <th className="px-3 py-2">Net</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {filteredRecords.map((rec) => (
+                  <tr key={rec.id} className={tableRow}>
                     <td className="px-3 py-2 font-mono text-[11px] text-slate-400">{rec.work_date}</td>
-                    <td className="px-3 py-2 font-semibold dashboard-strong">{rec.user_name}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
-                      {new Date(rec.punch_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
-                      {rec.punch_out_time
-                        ? new Date(rec.punch_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : rec.status === 'AUTO_CHECKED_OUT'
-                        ? '11:40 PM (Auto)'
-                        : <span className="text-[#86EFAC]">In Progress</span>}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-slate-300">{grossHours}h</td>
-                    <td className="px-3 py-2 font-mono text-amber-400">{rec.total_break_minutes}m</td>
-                    <td className="px-3 py-2 font-mono font-bold text-emerald-400">{netHours}h</td>
                     <td className="px-3 py-2">
-                      {rec.status === 'CHECKED_IN' && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse"></span> Active
-                        </span>
-                      )}
-                      {rec.status === 'ON_BREAK' && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          <Coffee className="w-2.5 h-2.5" /> Lunch
-                        </span>
-                      )}
-                      {rec.status === 'CHECKED_OUT' && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">
-                          Completed
-                        </span>
-                      )}
-                      {rec.status === 'AUTO_CHECKED_OUT' && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400">
-                          11:40 PM Auto
-                        </span>
-                      )}
+                      <p className="font-semibold dashboard-strong leading-tight">{rec.user_name}</p>
+                      {punchMeta(rec)}
                     </td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">{formatTime(rec.punch_in_time, timeZone)}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">{punchOutCell(rec)}</td>
+                    <td className="px-3 py-2 font-mono text-slate-300">{minutesToHours(rec.gross_worked_minutes)}h</td>
+                    <td className="px-3 py-2 font-mono text-amber-400">{rec.total_break_minutes}m</td>
+                    <td className="px-3 py-2 font-mono font-bold text-emerald-400">{minutesToHours(rec.net_worked_minutes)}h</td>
+                    <td className="px-3 py-2"><StatusBadge status={rec.status} /></td>
                     <td className="px-3 py-2 text-right">
-                      {rec.status === 'CHECKED_IN' || rec.status === 'ON_BREAK' ? (
-                        <button
-                          onClick={() => {
-                            setSelectedRecord(rec);
-                            setShowCheckoutModal(true);
-                          }}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition"
-                        >
-                          Override Out
+                      {isOpenShift(rec.status) ? (
+                        <button onClick={() => openCheckout(rec)} className={btnGhost}>
+                          <LogOut className="w-3 h-3" /> Force check-out
                         </button>
                       ) : (
-                        <span className="text-[10px] text-slate-500">Locked</span>
+                        <span className="text-[10px] text-slate-500">Closed</span>
                       )}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Force Checkout Modal */}
-      {showCheckoutModal && selectedRecord && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 z-50">
-          <div className="max-w-md w-full dashboard-card rounded-lg p-4 sm:p-5 shadow-2xl space-y-3 text-xs">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-              <h3 className="font-bold text-sm dashboard-strong">Manager Force Check-Out</h3>
-              <button onClick={() => setShowCheckoutModal(false)} className="p-1 text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <p className="text-[10px] text-[#6B7280] flex items-start gap-1">
+        <Info className="w-3 h-3 shrink-0 mt-px" />
+        Times are shown in the company timezone{timeZone ? ` (${timeZone})` : ''}. Manual corrections are recorded with who made them and the reason.
+      </p>
 
-            <form onSubmit={handleForceCheckout} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Representative</label>
-                <input
-                  type="text"
-                  disabled
-                  value={selectedRecord.user_name}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-800 bg-slate-900/60 text-slate-400 text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Override Check-Out Time</label>
-                <input
-                  type="time"
-                  required
-                  value={overrideTime}
-                  onChange={(e) => setOverrideTime(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Manager Audit Reason</label>
-                <textarea
-                  required
-                  rows={2}
-                  value={overrideReason}
-                  onChange={(e) => setOverrideReason(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCheckoutModal(false)}
-                  className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-3.5 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
-                >
-                  Confirm Force Check-Out
-                </button>
-              </div>
-            </form>
+      {/* ─── Force check-out ─── */}
+      <Modal
+        open={!!checkoutTarget}
+        onClose={() => !checkingOut && setCheckoutTarget(null)}
+        title="Force check-out"
+        description={checkoutTarget ? `${checkoutTarget.user_name} · ${checkoutTarget.work_date} · checked in ${formatTime(checkoutTarget.punch_in_time, timeZone)}` : undefined}
+        size="sm"
+      >
+        <form onSubmit={handleForceCheckout} className="space-y-2.5" noValidate>
+          <div>
+            <label htmlFor="override_time" className={labelClass}>Check-out time <span className="font-normal text-slate-500">(optional)</span></label>
+            <input id="override_time" type="time" value={overrideTime} onChange={(e) => setOverrideTime(e.target.value)} className={inputClass} />
+            <p className={helpClass}>Leave empty to use the current time. Interpreted in {timeZone || 'the company timezone'}.</p>
           </div>
-        </div>
-      )}
-
-      {/* Manual Check-In Modal */}
-      {showCheckInModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 z-50">
-          <div className="max-w-md w-full dashboard-card rounded-lg p-4 sm:p-5 shadow-2xl space-y-3 text-xs">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-              <h3 className="font-bold text-sm dashboard-strong">Manual Punch In</h3>
-              <button onClick={() => setShowCheckInModal(false)} className="p-1 text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleManualCheckIn} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Select Employee</label>
-                <select
-                  value={manualUserId}
-                  onChange={(e) => setManualUserId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs"
-                >
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.full_name} ({emp.phone})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Check-In Time</label>
-                <input
-                  type="time"
-                  required
-                  value={manualTime}
-                  onChange={(e) => setManualTime(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Audit Reason</label>
-                <textarea
-                  required
-                  rows={2}
-                  value={manualReason}
-                  onChange={(e) => setManualReason(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCheckInModal(false)}
-                  className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-3.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold"
-                >
-                  Record Check-In
-                </button>
-              </div>
-            </form>
+          <div>
+            <label htmlFor="override_reason" className={labelClass}>Reason (audit trail)</label>
+            <textarea
+              id="override_reason"
+              required
+              rows={2}
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="Why is this shift being closed by a manager?"
+              className={inputClass}
+            />
           </div>
-        </div>
-      )}
+          {checkoutError && <p role="alert" className={errorText}>{checkoutError}</p>}
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setCheckoutTarget(null)} disabled={checkingOut} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={checkingOut || overrideReason.trim().length < 3} className={btnDanger}>
+              {checkingOut ? 'Checking out…' : 'Confirm check-out'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ─── Manual check-in ─── */}
+      <Modal open={checkInOpen} onClose={() => !checkingIn && setCheckInOpen(false)} title="Manual check-in" description="Records a shift start on behalf of an employee." size="sm">
+        <form onSubmit={handleManualCheckIn} className="space-y-2.5" noValidate>
+          <div>
+            <label htmlFor="manual_user" className={labelClass}>Employee</label>
+            <select id="manual_user" required value={manualUserId} onChange={(e) => setManualUserId(e.target.value)} className={inputClass}>
+              <option value="">Choose an employee…</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.phone})</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="manual_date" className={labelClass}>Work date</label>
+              <input id="manual_date" type="date" required max={today} value={manualDate} onChange={(e) => setManualDate(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="manual_time" className={labelClass}>Check-in time</label>
+              <input id="manual_time" type="time" required value={manualTime} onChange={(e) => setManualTime(e.target.value)} className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="manual_reason" className={labelClass}>Reason (audit trail)</label>
+            <textarea
+              id="manual_reason"
+              required
+              rows={2}
+              value={manualReason}
+              onChange={(e) => setManualReason(e.target.value)}
+              placeholder="Why is the check-in being recorded manually?"
+              className={inputClass}
+            />
+          </div>
+          {checkInError && <p role="alert" className={errorText}>{checkInError}</p>}
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setCheckInOpen(false)} disabled={checkingIn} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={checkingIn || !manualUserId || !manualTime || !manualDate || manualReason.trim().length < 3} className={btnPrimary}>
+              {checkingIn ? 'Recording…' : 'Record check-in'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

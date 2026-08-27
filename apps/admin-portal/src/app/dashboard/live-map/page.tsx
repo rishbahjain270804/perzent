@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { LayerGroup, Map as LeafletMap, Marker } from 'leaflet';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import type { Circle, LayerGroup, Map as LeafletMap, Marker, Polyline } from 'leaflet';
 import {
+  AlertTriangle,
   ArrowLeft,
   Battery,
   CalendarDays,
@@ -14,23 +16,43 @@ import {
   Route,
   Users,
 } from 'lucide-react';
-import type { DailyRoutePlayback, LiveTeamMember } from '@perzent/shared-types';
+import type { DailyRoutePlayback } from '@perzent/shared-types';
+import { apiFetch, errorMessage, isAbortError, formatTime, todayInTimezone, isValidYmd } from '@/lib/client';
+import { useSession } from '@/components/useSession';
+import {
+  freshnessOf,
+  freshnessLabel,
+  secondsSincePing,
+  speedKmh,
+  isOnShift,
+  SHIFT_META,
+  type LiveMember,
+  type Freshness,
+} from '@/components/liveStatus';
 
 type MapMode = 'LIVE' | 'DAY';
+type Leaflet = typeof import('leaflet');
 
-const today = () => new Date().toLocaleDateString('en-CA');
-
-const statusMeta: Record<LiveTeamMember['shift_status'], { label: string; color: string; surface: string }> = {
-  CHECKED_IN: { label: 'On duty', color: '#16a34a', surface: '#dcfce7' },
-  ON_BREAK: { label: 'On break', color: '#d97706', surface: '#fef3c7' },
-  CHECKED_OUT: { label: 'Checked out', color: '#64748b', surface: '#e2e8f0' },
-  OFF_DUTY: { label: 'Off duty', color: '#94a3b8', surface: '#f1f5f9' },
-};
-
-function formatTime(value?: string) {
-  if (!value) return 'No ping';
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+interface MarkerState {
+  marker: Marker;
+  accuracyCircle?: Circle;
+  lat: number;
+  lng: number;
+  heading: number;
+  animFrame?: number;
+  iconKey: string;
+  kind: 'vehicle' | 'idle';
+  liveTrailPoints: Array<[number, number]>;
+  livePolyline?: Polyline;
 }
+
+const LIVE_POLL_MS = 3_000;
+const DAY_POLL_MS = 15_000;
+const MAX_TRAIL_POINT_MARKERS = 400;
+
+/* ------------------------------------------------------------------ */
+/* Pure helpers                                                        */
+/* ------------------------------------------------------------------ */
 
 function buildTooltip(title: string, rows: Array<[string, string]>) {
   const card = document.createElement('div');
@@ -50,411 +72,651 @@ function buildTooltip(title: string, rows: Array<[string, string]>) {
   return card;
 }
 
-export default function LiveMapPage() {
+const normalizeHeading = (value: number) => ((value % 360) + 360) % 360;
+
+/** Signed shortest rotation from `from` to `to`, in (-180, 180]. */
+const shortestArcDelta = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;
+
+const headingBucket = (heading: number) => Math.round(normalizeHeading(heading) / 45) % 8;
+
+function speedBucket(kmh: number) {
+  if (kmh < 3) return 0;
+  if (kmh < 15) return 1;
+  if (kmh < 40) return 2;
+  if (kmh < 80) return 3;
+  return 4;
+}
+
+const yesNo = (value: boolean | undefined, yes: string, no: string) => (value === undefined ? 'Not reported' : value ? yes : no);
+
+function vehicleIconHtml(
+  member: LiveMember,
+  freshness: Freshness,
+  moving: boolean,
+  kmh: number,
+  heading: number,
+  seconds: number | null,
+  reducedMotion: boolean
+) {
+  const meta = SHIFT_META[member.shift_status];
+  const stateClass = freshness === 'stale' ? 'is-stale' : freshness === 'disconnected' ? 'is-disconnected' : '';
+  const halos = freshness === 'live' && !reducedMotion ? '<div class="swiggy-radar-halo"></div><div class="swiggy-radar-halo-2"></div>' : '';
+  const beam = moving && freshness === 'live' && !reducedMotion ? '<div class="swiggy-headlight-beam"></div>' : '';
+  let pill = '';
+  if (freshness === 'stale') {
+    pill = `<div class="swiggy-status-pill is-stale" data-role="pill">${freshnessLabel('stale', seconds)}</div>`;
+  } else if (freshness === 'disconnected') {
+    pill = `<div class="swiggy-status-pill is-disconnected" data-role="pill">GPS/Net lost</div>`;
+  } else if (moving) {
+    pill = `<div class="swiggy-speed-badge" data-role="pill">${kmh} km/h</div>`;
+  }
+  return `<div class="swiggy-marker-wrap ${stateClass}" style="--marker-color:${meta.color}">${halos}<div class="swiggy-vehicle-disc" style="transform: rotate(${Math.round(heading)}deg);">${beam}<svg viewBox="0 0 24 24" class="swiggy-vehicle-icon" aria-hidden="true"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg></div>${pill}</div>`;
+}
+
+function makeVehicleIcon(leaflet: Leaflet, html: string) {
+  return leaflet.divIcon({ className: 'employee-live-marker', html, iconSize: [46, 46], iconAnchor: [23, 23] });
+}
+
+function makeIdleIcon(leaflet: Leaflet) {
+  return leaflet.divIcon({
+    className: 'employee-idle-marker',
+    html: '<span class="employee-idle-dot"></span>',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  });
+}
+
+function applyRotation(state: MarkerState, heading: number) {
+  const disc = state.marker.getElement()?.querySelector<HTMLElement>('.swiggy-vehicle-disc');
+  if (disc) disc.style.transform = `rotate(${Math.round(heading)}deg)`;
+}
+
+function memberTooltip(member: LiveMember, freshness: Freshness, seconds: number | null, timeZone?: string) {
+  const location = member.current_location;
+  const telemetry = member.telemetry;
+  const moving = !!member.is_moving;
+  const kmh = speedKmh(member);
+  const precisionLabel = !location ? '—' : location.accuracy <= 10 ? `±${Math.round(location.accuracy)} m (🎯 High Precision)` : location.accuracy <= 25 ? `±${Math.round(location.accuracy)} m (⚡ Good Signal)` : `±${Math.round(location.accuracy)} m (📡 Moderate Signal)`;
+
+  const rows: Array<[string, string]> = [
+    ['Status', SHIFT_META[member.shift_status].label],
+    ['Signal', freshness === 'idle' ? 'Not on shift' : freshnessLabel(freshness, seconds)],
+    ['Speed', moving ? `${kmh} km/h (moving)` : 'Stationary'],
+    ['Location', location?.address_name || 'Address unavailable'],
+    ['Last ping', formatTime(location?.last_ping_at, timeZone)],
+    ['Accuracy', precisionLabel],
+    ['Battery', member.battery_level == null ? 'Unavailable' : `${member.battery_level}%`],
+    ['Device', member.device_model || 'Unavailable'],
+    ['GPS', yesNo(telemetry?.location_services_enabled, 'On', 'Off')],
+    ['Location permission', yesNo(telemetry?.location_permission_granted, 'Allowed', 'Blocked')],
+    ['Power saver', yesNo(telemetry?.battery_power_save, 'On', 'Off')],
+    ['Mock location', yesNo(telemetry?.mock_location_detected, 'Detected', 'Clear')],
+  ];
+  if (member.has_tamper_alert) rows.push(['Alert', member.tamper_reason || 'Tamper alert']);
+  return buildTooltip(member.full_name, rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                                */
+/* ------------------------------------------------------------------ */
+
+function LiveMapInner() {
+  const searchParams = useSearchParams();
+  const paramUser = searchParams.get('user_id');
+  const paramDate = searchParams.get('date');
+  const { session } = useSession();
+  const timeZone = session?.company?.timezone;
+
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
-  const layerRef = useRef<LayerGroup | null>(null);
-  const leafletRef = useRef<typeof import('leaflet') | null>(null);
-  const liveMarkerRefs = useRef(
-    new Map<
-      string,
-      {
-        marker: Marker;
-        lat: number;
-        lng: number;
-        heading: number;
-        animFrame?: number;
-      }
-    >()
-  );
+  const liveLayerRef = useRef<LayerGroup | null>(null);
+  const trailLayerRef = useRef<LayerGroup | null>(null);
+  const leafletRef = useRef<Leaflet | null>(null);
+  const markerStatesRef = useRef(new Map<string, MarkerState>());
+  const hasFittedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const reducedMotionRef = useRef(false);
 
   const [mapReady, setMapReady] = useState(false);
-  const [mode, setMode] = useState<MapMode>('LIVE');
-  const [team, setTeam] = useState<LiveTeamMember[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(today());
+  const [mode, setMode] = useState<MapMode>(paramUser ? 'DAY' : 'LIVE');
+  const [team, setTeam] = useState<LiveMember[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(paramUser);
+  const [followSelected, setFollowSelected] = useState(false);
+  const followSelectedRef = useRef(false);
+  const selectedIdRef = useRef<string | null>(selectedId);
+
+  useEffect(() => {
+    followSelectedRef.current = followSelected;
+  }, [followSelected]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  const [selectedDate, setSelectedDate] = useState(() => (isValidYmd(paramDate) ? paramDate : todayInTimezone()));
   const [playback, setPlayback] = useState<DailyRoutePlayback | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
   const [error, setError] = useState('');
+  const [routeError, setRouteError] = useState('');
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
-  const selectedUser = useMemo(
-    () => team.find((member) => member.user_id === selectedId) || null,
-    [selectedId, team]
-  );
+  const selectedUser = useMemo(() => team.find((member) => member.user_id === selectedId) || null, [selectedId, team]);
   const locatedTeam = useMemo(() => team.filter((member) => member.current_location), [team]);
+  const onShiftCount = useMemo(() => team.filter(isOnShift).length, [team]);
+  const today = todayInTimezone(timeZone);
 
-  const fetchLiveTeam = useCallback(async () => {
+  /* Reduced-motion preference */
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => {
+      reducedMotionRef.current = query.matches;
+    };
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  /* Polling: in-flight guard, AbortController, pauses while the tab is hidden. */
+  const fetchLiveTeam = useCallback(async (manual = false) => {
+    if (inFlightRef.current) return;
+    if (!manual && typeof document !== 'undefined' && document.hidden) return;
+    inFlightRef.current = true;
+    if (manual) setRefreshing(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      setError('');
-      const response = await fetch('/api/live-team', { cache: 'no-store' });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not load the live team');
+      const result = await apiFetch<LiveMember[]>('/api/live-team', { signal: controller.signal });
       if (!Array.isArray(result)) throw new Error('Unexpected live-team response');
       setTeam(result);
       setLastRefreshed(new Date());
+      setNow(Date.now());
+      setError(''); // only clear an existing error once a poll succeeds
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not load the live team');
+      if (isAbortError(reason)) return;
+      setError(errorMessage(reason, 'Could not load the live team'));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  // 🚀 Ultra-responsive 3-second live polling for real-time Zomato/Swiggy/Rapido vehicle navigation
   useEffect(() => {
-    fetchLiveTeam();
-    const interval = window.setInterval(fetchLiveTeam, 3_000);
-    return () => window.clearInterval(interval);
-  }, [fetchLiveTeam]);
+    fetchLiveTeam(true);
+    const interval = window.setInterval(() => fetchLiveTeam(false), mode === 'LIVE' ? LIVE_POLL_MS : DAY_POLL_MS);
+    const onVisibility = () => {
+      if (!document.hidden) fetchLiveTeam(false);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      abortRef.current?.abort();
+    };
+  }, [fetchLiveTeam, mode]);
 
+  /* Map bootstrap */
   useEffect(() => {
     let mounted = true;
     import('leaflet').then((leaflet) => {
       if (!mounted || !mapNodeRef.current || mapRef.current) return;
       leafletRef.current = leaflet;
-      const map = leaflet.map(mapNodeRef.current, {
-        zoomControl: false,
-        attributionControl: true,
-      }).setView([22.8, 79.1], 5);
+      const map = leaflet.map(mapNodeRef.current, { zoomControl: false, attributionControl: true }).setView([22.8, 79.1], 5);
       leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
-      leaflet.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
+      leaflet
+        .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })
+        .addTo(map);
       mapRef.current = map;
-      layerRef.current = leaflet.layerGroup().addTo(map);
+      trailLayerRef.current = leaflet.layerGroup().addTo(map);
+      liveLayerRef.current = leaflet.layerGroup().addTo(map);
       setMapReady(true);
     });
     return () => {
       mounted = false;
+      for (const state of markerStatesRef.current.values()) {
+        if (state.animFrame) cancelAnimationFrame(state.animFrame);
+      }
+      markerStatesRef.current.clear();
       mapRef.current?.remove();
       mapRef.current = null;
-      layerRef.current = null;
+      liveLayerRef.current = null;
+      trailLayerRef.current = null;
       leafletRef.current = null;
+      setMapReady(false);
     };
   }, []);
 
+  /* Day-route fetch (DAY mode only) */
   useEffect(() => {
     if (mode !== 'DAY' || !selectedId) return;
-    let current = true;
+    const controller = new AbortController();
     setRouteLoading(true);
-    setError('');
-    fetch(`/api/routes?user_id=${encodeURIComponent(selectedId)}&date=${selectedDate}`, { cache: 'no-store' })
-      .then(async (response) => {
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Could not load this route');
-        if (current) setPlayback(result);
-      })
+    setRouteError('');
+    apiFetch<DailyRoutePlayback>(`/api/routes?user_id=${encodeURIComponent(selectedId)}&date=${selectedDate}`, { signal: controller.signal })
+      .then((result) => setPlayback(result))
       .catch((reason) => {
-        if (current) {
-          setPlayback(null);
-          setError(reason.message || 'Could not load this route');
-        }
+        if (isAbortError(reason)) return;
+        setPlayback(null);
+        setRouteError(errorMessage(reason, 'Could not load this route'));
       })
-      .finally(() => current && setRouteLoading(false));
-    return () => { current = false; };
+      .finally(() => {
+        if (!controller.signal.aborted) setRouteLoading(false);
+      });
+    return () => controller.abort();
   }, [mode, selectedDate, selectedId]);
 
-  // Smooth position interpolation (Linear Lerp with requestAnimationFrame)
-  const animateMarker = useCallback((
-    state: { marker: Marker; lat: number; lng: number; heading: number; animFrame?: number },
-    targetLat: number,
-    targetLng: number,
-    targetHeading: number,
-    durationMs = 2600
-  ) => {
-    if (state.animFrame) {
-      cancelAnimationFrame(state.animFrame);
+  /* Smooth glide + shortest-arc rotation + circle/polyline sync + Camera Lock via requestAnimationFrame */
+  const animateMarker = useCallback((state: MarkerState, targetLat: number, targetLng: number, targetHeading: number, userId: string, durationMs = 2800) => {
+    if (state.animFrame) cancelAnimationFrame(state.animFrame);
+    if (reducedMotionRef.current) {
+      state.lat = targetLat;
+      state.lng = targetLng;
+      state.heading = normalizeHeading(targetHeading);
+      state.marker.setLatLng([targetLat, targetLng]);
+      state.accuracyCircle?.setLatLng([targetLat, targetLng]);
+      applyRotation(state, state.heading);
+      if (followSelectedRef.current && selectedIdRef.current === userId) {
+        mapRef.current?.panTo([targetLat, targetLng], { animate: false });
+      }
+      state.animFrame = undefined;
+      return;
     }
     const startLat = state.lat;
     const startLng = state.lng;
     const startHeading = state.heading;
+    const delta = shortestArcDelta(startHeading, targetHeading);
     const startTime = performance.now();
 
-    const frame = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / durationMs);
-      // Ease out cubic
-      const ease = 1 - Math.pow(1 - progress, 3);
-
-      const curLat = startLat + (targetLat - startLat) * ease;
-      const curLng = startLng + (targetLng - startLng) * ease;
-      const curHeading = startHeading + (targetHeading - startHeading) * ease;
-
-      state.lat = curLat;
-      state.lng = curLng;
-      state.heading = curHeading;
-      state.marker.setLatLng([curLat, curLng]);
-
-      // Rotate inner vehicle disc icon
-      const iconEl = state.marker.getElement();
-      if (iconEl) {
-        const discEl = iconEl.querySelector<HTMLElement>('.swiggy-vehicle-disc');
-        if (discEl) {
-          discEl.style.transform = `rotate(${Math.round(curHeading)}deg)`;
-        }
+    const frame = (timestamp: number) => {
+      const progress = Math.min(1, (timestamp - startTime) / durationMs);
+      // Smooth Hermite cubic ease for ultra-smooth vehicle gliding
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      state.lat = startLat + (targetLat - startLat) * ease;
+      state.lng = startLng + (targetLng - startLng) * ease;
+      state.heading = normalizeHeading(startHeading + delta * ease);
+      state.marker.setLatLng([state.lat, state.lng]);
+      state.accuracyCircle?.setLatLng([state.lat, state.lng]);
+      applyRotation(state, state.heading);
+      if (followSelectedRef.current && selectedIdRef.current === userId) {
+        mapRef.current?.panTo([state.lat, state.lng], { animate: false });
       }
-
-      if (progress < 1) {
-        state.animFrame = requestAnimationFrame(frame);
-      } else {
-        state.animFrame = undefined;
-      }
+      state.animFrame = progress < 1 ? requestAnimationFrame(frame) : undefined;
     };
     state.animFrame = requestAnimationFrame(frame);
   }, []);
 
+  /* Mode switch: clear the layer that belongs to the other mode. */
+  useEffect(() => {
+    if (!mapReady) return;
+    if (mode === 'LIVE') {
+      trailLayerRef.current?.clearLayers();
+      hasFittedRef.current = false;
+    } else {
+      for (const state of markerStatesRef.current.values()) {
+        if (state.animFrame) cancelAnimationFrame(state.animFrame);
+        if (state.accuracyCircle) liveLayerRef.current?.removeLayer(state.accuracyCircle);
+        if (state.livePolyline) liveLayerRef.current?.removeLayer(state.livePolyline);
+      }
+      markerStatesRef.current.clear();
+      liveLayerRef.current?.clearLayers();
+    }
+  }, [mode, mapReady]);
+
+  /* LIVE markers: diff against existing states; setIcon only when the icon key changes. */
   useEffect(() => {
     const leaflet = leafletRef.current;
     const map = mapRef.current;
-    const layer = layerRef.current;
-    if (!mapReady || !leaflet || !map || !layer) return;
+    const layer = liveLayerRef.current;
+    if (!mapReady || !leaflet || !map || !layer || mode !== 'LIVE') return;
 
-    if (mode === 'LIVE') {
-      const currentMemberIds = new Set(locatedTeam.map((m) => m.user_id));
+    const states = markerStatesRef.current;
+    const nowTs = Date.now();
+    const currentIds = new Set(locatedTeam.map((member) => member.user_id));
 
-      // Remove stale markers
-      for (const [userId, state] of liveMarkerRefs.current.entries()) {
-        if (!currentMemberIds.has(userId)) {
-          if (state.animFrame) cancelAnimationFrame(state.animFrame);
-          layer.removeLayer(state.marker);
-          liveMarkerRefs.current.delete(userId);
-        }
+    for (const [userId, state] of states.entries()) {
+      if (!currentIds.has(userId)) {
+        if (state.animFrame) cancelAnimationFrame(state.animFrame);
+        if (state.accuracyCircle) layer.removeLayer(state.accuracyCircle);
+        if (state.livePolyline) layer.removeLayer(state.livePolyline);
+        layer.removeLayer(state.marker);
+        states.delete(userId);
       }
-
-      const bounds: Array<[number, number]> = [];
-
-      locatedTeam.forEach((member) => {
-        const location = member.current_location!;
-        const meta = statusMeta[member.shift_status];
-        const heading = location.heading || 0;
-        const speedKmh = location.speed ? Math.round(location.speed * 3.6) : 0;
-        const isMoving = speedKmh > 2;
-
-        const iconHtml = `
-          <div class="swiggy-marker-wrap" style="--marker-color:${meta.color}">
-            <div class="swiggy-radar-halo"></div>
-            <div class="swiggy-radar-halo-2"></div>
-            <div class="swiggy-vehicle-disc" style="transform: rotate(${heading}deg);">
-              <svg viewBox="0 0 24 24" class="swiggy-vehicle-icon">
-                <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
-              </svg>
-            </div>
-            ${isMoving ? `<div class="swiggy-speed-badge">${speedKmh} km/h</div>` : ''}
-          </div>
-        `;
-
-        const existingState = liveMarkerRefs.current.get(member.user_id);
-        const telemetry = member.telemetry;
-
-        const tooltipNode = buildTooltip(member.full_name, [
-          ['Status', meta.label],
-          ['Speed', isMoving ? `${speedKmh} km/h (Moving)` : 'Stationary'],
-          ['Location', location.address_name || 'Address unavailable'],
-          ['Last ping', formatTime(location.last_ping_at)],
-          ['Accuracy', `±${Math.round(location.accuracy)} m`],
-          ['Battery', member.battery_level == null ? 'Unavailable' : `${member.battery_level}%`],
-          ['Device', member.device_model || 'Unavailable'],
-          ['GPS', telemetry?.location_services_enabled === undefined ? 'Not reported' : telemetry.location_services_enabled ? 'On' : 'Off'],
-          ['Location permission', telemetry?.location_permission_granted === undefined ? 'Not reported' : telemetry.location_permission_granted ? 'Allowed' : 'Blocked'],
-          ['Developer options', telemetry?.developer_options_enabled === undefined ? 'Not reported' : telemetry.developer_options_enabled ? 'On' : 'Off'],
-          ['Power saver', telemetry?.battery_power_save === undefined ? 'Not reported' : telemetry.battery_power_save ? 'On' : 'Off'],
-          ['Mock location', telemetry?.mock_location_detected === undefined ? 'Not reported' : telemetry.mock_location_detected ? 'Detected' : 'Clear'],
-        ]);
-
-        if (existingState) {
-          // Update icon & tooltip without tearing down marker
-          const icon = leaflet.divIcon({
-            className: 'employee-live-marker',
-            html: iconHtml,
-            iconSize: [46, 46],
-            iconAnchor: [23, 23],
-          });
-          existingState.marker.setIcon(icon);
-          existingState.marker.setTooltipContent(tooltipNode);
-
-          // Smoothly glide marker to new coordinates
-          if (existingState.lat !== location.latitude || existingState.lng !== location.longitude) {
-            animateMarker(existingState, location.latitude, location.longitude, heading);
-          }
-        } else {
-          // New marker creation
-          const icon = leaflet.divIcon({
-            className: 'employee-live-marker',
-            html: iconHtml,
-            iconSize: [46, 46],
-            iconAnchor: [23, 23],
-          });
-          const marker = leaflet.marker([location.latitude, location.longitude], { icon }).addTo(layer);
-          marker.bindTooltip(tooltipNode, {
-            direction: 'top',
-            offset: [0, -18],
-            opacity: 1,
-            className: 'perzent-leaflet-tooltip',
-          });
-          marker.on('click', () => {
-            setSelectedId(member.user_id);
-            setMode('DAY');
-          });
-
-          liveMarkerRefs.current.set(member.user_id, {
-            marker,
-            lat: location.latitude,
-            lng: location.longitude,
-            heading,
-          });
-        }
-        bounds.push([location.latitude, location.longitude]);
-      });
-
-      // Fit bounds only on initial load
-      if (!lastRefreshed && bounds.length > 0) {
-        if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
-        if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
-      }
-    } else if (mode === 'DAY' && playback) {
-      layer.clearLayers();
-      liveMarkerRefs.current.clear();
-      const bounds: Array<[number, number]> = [];
-
-      const positions = playback.waypoints.map((point) => [point.latitude, point.longitude] as [number, number]);
-      if (positions.length > 1) {
-        leaflet.polyline(positions, { color: '#2563eb', weight: 5, opacity: 0.85, className: 'live-trail-dash' }).addTo(layer);
-      }
-      playback.waypoints.forEach((point, index) => {
-        const isStart = index === 0;
-        const isEnd = index === playback.waypoints.length - 1;
-        const marker = leaflet.circleMarker([point.latitude, point.longitude], {
-          radius: isStart || isEnd ? 8 : 4,
-          color: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#ffffff',
-          weight: isStart || isEnd ? 3 : 2,
-          fillColor: isStart ? '#16a34a' : isEnd ? '#dc2626' : '#2563eb',
-          fillOpacity: 0.95,
-        }).addTo(layer);
-        marker.bindTooltip(buildTooltip(
-          isStart ? 'Shift started' : isEnd ? 'Latest / final point' : `Route point ${index + 1}`,
-          [
-            ['Time', formatTime(point.recorded_at)],
-            ['Speed', `${Math.round(point.speed * 3.6)} km/h`],
-            ['Accuracy', `±${Math.round(point.accuracy)} m`],
-          ]
-        ), { direction: 'top', offset: [0, -8], opacity: 1, className: 'perzent-leaflet-tooltip' });
-        bounds.push([point.latitude, point.longitude]);
-      });
-      playback.stops.forEach((stop) => {
-        const marker = leaflet.circleMarker([stop.latitude, stop.longitude], {
-          radius: 9,
-          color: '#ffffff',
-          weight: 3,
-          fillColor: '#f59e0b',
-          fillOpacity: 1,
-        }).addTo(layer);
-        marker.bindTooltip(buildTooltip('Recorded stop', [
-          ['Place', stop.address_name],
-          ['Arrived', formatTime(stop.start_time)],
-          ['Duration', `${stop.duration_minutes} min`],
-        ]), { direction: 'top', offset: [0, -9], opacity: 1, className: 'perzent-leaflet-tooltip' });
-        bounds.push([stop.latitude, stop.longitude]);
-      });
-
-      if (bounds.length === 1) map.setView(bounds[0], 15, { animate: true });
-      if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: true });
     }
-  }, [locatedTeam, mapReady, mode, playback, animateMarker, lastRefreshed]);
 
-  const focusLiveEmployee = (member: LiveTeamMember) => {
-    const state = liveMarkerRefs.current.get(member.user_id);
-    if (!state || !member.current_location) return;
-    state.marker.openTooltip();
-    mapRef.current?.panTo([member.current_location.latitude, member.current_location.longitude], { animate: true });
+    const bounds: Array<[number, number]> = [];
+
+    locatedTeam.forEach((member) => {
+      const location = member.current_location!;
+      const freshness = freshnessOf(member, nowTs);
+      const kind: MarkerState['kind'] = freshness === 'idle' ? 'idle' : 'vehicle';
+      const heading = normalizeHeading(location.heading || 0);
+      const kmh = speedKmh(member);
+      const moving = !!member.is_moving;
+      const seconds = secondsSincePing(member, nowTs);
+      const iconKey =
+        kind === 'idle'
+          ? 'idle'
+          : `${member.shift_status}|${freshness}|${headingBucket(heading)}|${speedBucket(kmh)}|${moving ? 1 : 0}`;
+      const tooltip = memberTooltip(member, freshness, seconds, timeZone);
+
+      let state = states.get(member.user_id);
+      if (state && state.kind !== kind) {
+        if (state.animFrame) cancelAnimationFrame(state.animFrame);
+        if (state.accuracyCircle) layer.removeLayer(state.accuracyCircle);
+        if (state.livePolyline) layer.removeLayer(state.livePolyline);
+        layer.removeLayer(state.marker);
+        states.delete(member.user_id);
+        state = undefined;
+      }
+
+      if (!state) {
+        const icon =
+          kind === 'idle'
+            ? makeIdleIcon(leaflet)
+            : makeVehicleIcon(leaflet, vehicleIconHtml(member, freshness, moving, kmh, heading, seconds, reducedMotionRef.current));
+        const marker = leaflet
+          .marker([location.latitude, location.longitude], { icon, zIndexOffset: kind === 'idle' ? 0 : 500 })
+          .addTo(layer);
+        marker.bindTooltip(tooltip, { direction: 'top', offset: [0, kind === 'idle' ? -6 : -18], opacity: 1, className: 'perzent-leaflet-tooltip' });
+        marker.on('click', () => {
+          setSelectedId(member.user_id);
+          setPlayback(null);
+          setMode('DAY');
+        });
+
+        // Dynamic precision accuracy circle
+        let accuracyCircle: Circle | undefined;
+        if (kind === 'vehicle' && location.accuracy) {
+          accuracyCircle = leaflet.circle([location.latitude, location.longitude], {
+            radius: Math.max(6, location.accuracy),
+            color: '#2563eb',
+            fillColor: '#3b82f6',
+            fillOpacity: 0.12,
+            weight: 1.5,
+            className: 'swiggy-accuracy-circle',
+          }).addTo(layer);
+        }
+
+        const liveTrailPoints: Array<[number, number]> = [[location.latitude, location.longitude]];
+
+        states.set(member.user_id, {
+          marker,
+          accuracyCircle,
+          lat: location.latitude,
+          lng: location.longitude,
+          heading,
+          iconKey,
+          kind,
+          liveTrailPoints,
+        });
+      } else {
+        state.marker.setTooltipContent(tooltip);
+
+        if (state.iconKey !== iconKey) {
+          state.marker.setIcon(makeVehicleIcon(leaflet, vehicleIconHtml(member, freshness, moving, kmh, state.heading, seconds, reducedMotionRef.current)));
+          state.iconKey = iconKey;
+          applyRotation(state, state.heading);
+        } else {
+          // Cheap text-only refresh of the pill (speed / stale seconds) without rebuilding the icon.
+          const pill = state.marker.getElement()?.querySelector<HTMLElement>('[data-role="pill"]');
+          if (pill) {
+            if (freshness === 'stale') pill.textContent = freshnessLabel('stale', seconds);
+            else if (freshness === 'live' && moving) pill.textContent = `${kmh} km/h`;
+          }
+        }
+
+        // Update accuracy radius
+        if (state.accuracyCircle && location.accuracy) {
+          state.accuracyCircle.setRadius(Math.max(6, location.accuracy));
+        }
+
+        // Append live breadcrumb polyline when moving
+        if (kind === 'vehicle' && moving) {
+          const lastPt = state.liveTrailPoints[state.liveTrailPoints.length - 1];
+          if (!lastPt || lastPt[0] !== location.latitude || lastPt[1] !== location.longitude) {
+            state.liveTrailPoints.push([location.latitude, location.longitude]);
+            if (state.liveTrailPoints.length > 25) state.liveTrailPoints.shift();
+            if (state.liveTrailPoints.length > 1) {
+              if (!state.livePolyline) {
+                state.livePolyline = leaflet.polyline(state.liveTrailPoints, {
+                  color: '#2563eb',
+                  weight: 4,
+                  opacity: 0.75,
+                  className: 'live-trail-dash',
+                }).addTo(layer);
+              } else {
+                state.livePolyline.setLatLngs(state.liveTrailPoints);
+              }
+            }
+          }
+        }
+
+        const moved = state.lat !== location.latitude || state.lng !== location.longitude;
+        if (kind === 'vehicle') {
+          if (moved || Math.abs(shortestArcDelta(state.heading, heading)) > 1) {
+            animateMarker(state, location.latitude, location.longitude, heading, member.user_id);
+          }
+        } else if (moved) {
+          state.lat = location.latitude;
+          state.lng = location.longitude;
+          state.marker.setLatLng([location.latitude, location.longitude]);
+          state.accuracyCircle?.setLatLng([location.latitude, location.longitude]);
+        }
+      }
+
+      bounds.push([location.latitude, location.longitude]);
+    });
+
+    if (!hasFittedRef.current && bounds.length > 0) {
+      if (bounds.length === 1) map.setView(bounds[0], 15, { animate: !reducedMotionRef.current });
+      else map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: !reducedMotionRef.current });
+      hasFittedRef.current = true;
+    }
+  }, [locatedTeam, mapReady, mode, animateMarker, timeZone]);
+
+  /* DAY trail: depends only on playback + mode, not on the polled team. */
+  useEffect(() => {
+    const leaflet = leafletRef.current;
+    const map = mapRef.current;
+    const layer = trailLayerRef.current;
+    if (!mapReady || !leaflet || !map || !layer || mode !== 'DAY') return;
+
+    layer.clearLayers();
+    if (!playback) return;
+
+    const bounds: Array<[number, number]> = [];
+    const positions = playback.waypoints.map((point) => [point.latitude, point.longitude] as [number, number]);
+    if (positions.length > 1) {
+      leaflet.polyline(positions, { color: '#2563eb', weight: 5, opacity: 0.85, className: 'live-trail-dash' }).addTo(layer);
+    }
+
+    playback.stops.forEach((stop, index) => {
+      const marker = leaflet.circleMarker([stop.latitude, stop.longitude], {
+        radius: 7,
+        color: '#1d4ed8',
+        fillColor: '#60a5fa',
+        fillOpacity: 1,
+        weight: 3,
+      }).addTo(layer);
+      marker.bindTooltip(
+        buildTooltip(`Stop ${index + 1}`, [
+          ['Place', stop.address_name || 'Address unavailable'],
+          ['Arrived', formatTime(stop.start_time, timeZone)],
+          ['Left', formatTime(stop.end_time, timeZone)],
+          ['Duration', `${stop.duration_minutes} min`],
+        ]),
+        { direction: 'top', offset: [0, -12], opacity: 1, className: 'perzent-leaflet-tooltip' }
+      );
+      bounds.push([stop.latitude, stop.longitude]);
+    });
+
+    if (bounds.length === 1) map.setView(bounds[0], 15, { animate: !reducedMotionRef.current });
+    if (bounds.length > 1) map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16, animate: !reducedMotionRef.current });
+  }, [playback, mapReady, mode, timeZone]);
+
+  /* Roster interactions: hover highlights (tooltip only), click pans, trail button opens DAY. */
+  const highlight = (member: LiveMember) => {
+    if (mode !== 'LIVE') return;
+    markerStatesRef.current.get(member.user_id)?.marker.openTooltip();
   };
-
-  const openDay = (member: LiveTeamMember) => {
+  const unhighlight = (member: LiveMember) => {
+    markerStatesRef.current.get(member.user_id)?.marker.closeTooltip();
+  };
+  const panToMember = (member: LiveMember) => {
     setSelectedId(member.user_id);
+    if (mode !== 'LIVE' || !member.current_location) return;
+    mapRef.current?.panTo([member.current_location.latitude, member.current_location.longitude], { animate: !reducedMotionRef.current });
+    markerStatesRef.current.get(member.user_id)?.marker.openTooltip();
+  };
+  const openDay = (userId: string) => {
+    setSelectedId(userId);
     setPlayback(null);
+    setRouteError('');
     setMode('DAY');
   };
+  const backToLive = () => {
+    setMode('LIVE');
+    setPlayback(null);
+    setRouteError('');
+  };
+
+  const dayName = selectedUser?.full_name || playback?.user_name || 'Employee';
+  const rosterMembers = mode === 'LIVE' ? team : selectedUser ? [selectedUser] : [];
 
   return (
-    <div className="map-page space-y-4 max-w-[1600px] mx-auto text-slate-900 pb-16 md:pb-0">
+    <div className="map-page space-y-4 max-w-[1600px] mx-auto text-slate-900">
       <section className="map-toolbar">
         <div>
           <div className="flex items-center gap-2">
             <span className="map-eyebrow"><LocateFixed className="w-3.5 h-3.5" /> Workforce location</span>
-            {mode === 'LIVE' && <span className="map-live-pill"><i /> Live</span>}
+            {mode === 'LIVE' && <span className="map-live-pill"><i /> Live · 3 s</span>}
           </div>
-          <h1>{mode === 'LIVE' ? 'All employees — live view' : `${selectedUser?.full_name || 'Employee'} — full day`}</h1>
+          <h1>{mode === 'LIVE' ? 'All employees — live view' : `${dayName} — full day`}</h1>
           <p>
             {mode === 'LIVE'
-              ? `${locatedTeam.length} of ${team.length} employees have a stored live position`
-              : `${selectedDate} · ${playback?.waypoints.length || 0} route points · ${playback?.total_distance_km || 0} km`}
+              ? `${onShiftCount} on shift · ${locatedTeam.length} of ${team.length} employees have a stored position`
+              : `${selectedDate} · ${playback?.waypoints.length || 0} route points · ${playback?.stops.length || 0} stops · ${playback?.total_distance_km ?? 0} km`}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {mode === 'LIVE' && selectedId && (
+            <button
+              type="button"
+              className={`map-secondary-button ${followSelected ? '!bg-blue-600 !text-white !border-blue-600' : ''}`}
+              onClick={() => setFollowSelected((prev) => !prev)}
+              title="Lock map camera on selected vehicle"
+            >
+              <Navigation className={`w-3.5 h-3.5 ${followSelected ? 'animate-pulse' : ''}`} />
+              {followSelected ? 'Camera Locked' : 'Lock Camera'}
+            </button>
+          )}
           {mode === 'DAY' && (
             <>
               <label className="map-date-control">
                 <CalendarDays className="w-3.5 h-3.5" />
-                <input type="date" max={today()} value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+                <input type="date" max={today} value={selectedDate} onChange={(event) => isValidYmd(event.target.value) && setSelectedDate(event.target.value)} aria-label="Route date" />
               </label>
-              <button className="map-secondary-button" onClick={() => setMode('LIVE')}>
+              <button className="map-secondary-button" onClick={backToLive}>
                 <ArrowLeft className="w-3.5 h-3.5" /> All employees live
               </button>
             </>
           )}
-          <button className="map-secondary-button" onClick={fetchLiveTeam} disabled={loading}>
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          <button className="map-secondary-button" onClick={() => fetchLiveTeam(true)} disabled={refreshing}>
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
       </section>
 
-      {error && <div className="map-error">{error}</div>}
+      {error && (
+        <div className="map-error flex flex-col sm:flex-row sm:items-center justify-between gap-2" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => fetchLiveTeam(true)} disabled={refreshing} className="map-secondary-button !min-h-0 !py-1">
+            <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} /> Retry
+          </button>
+        </div>
+      )}
+      {mode === 'DAY' && routeError && <div className="map-error" role="alert">{routeError}</div>}
 
       <section className="map-layout">
         <aside className="map-roster">
           <div className="map-roster-heading">
             <div>
               <strong>{mode === 'LIVE' ? 'Team now' : 'Selected employee'}</strong>
-              <span>{lastRefreshed ? `Updated ${formatTime(lastRefreshed.toISOString())}` : 'Loading positions…'}</span>
+              <span>{lastRefreshed ? `Updated ${formatTime(lastRefreshed.toISOString(), timeZone)}` : loading ? 'Loading positions…' : 'Not updated yet'}</span>
             </div>
             <span>{mode === 'LIVE' ? team.length : 1}</span>
           </div>
 
           <div className="map-roster-list">
-            {(mode === 'LIVE' ? team : selectedUser ? [selectedUser] : []).map((member) => {
-              const meta = statusMeta[member.shift_status];
+            {rosterMembers.map((member) => {
+              const meta = SHIFT_META[member.shift_status];
+              const freshness = freshnessOf(member, now);
+              const label = freshnessLabel(freshness, secondsSincePing(member, now));
               return (
-                <button
+                <div
                   key={member.user_id}
                   className={`map-employee-card ${selectedId === member.user_id ? 'is-selected' : ''}`}
-                  onMouseEnter={() => mode === 'LIVE' && focusLiveEmployee(member)}
-                  onMouseLeave={() => liveMarkerRefs.current.get(member.user_id)?.closeTooltip()}
-                  onFocus={() => mode === 'LIVE' && focusLiveEmployee(member)}
-                  onClick={() => openDay(member)}
+                  onMouseEnter={() => highlight(member)}
+                  onMouseLeave={() => unhighlight(member)}
                 >
-                  <span className="map-avatar">{member.full_name.slice(0, 1).toUpperCase()}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="map-employee-name">{member.full_name}</span>
-                    <span className="map-employee-location">
-                      {member.current_location?.address_name || 'No location received today'}
+                  <button
+                    type="button"
+                    className="map-employee-main"
+                    onClick={() => panToMember(member)}
+                    onFocus={() => highlight(member)}
+                    onBlur={() => unhighlight(member)}
+                    title={mode === 'LIVE' ? 'Centre the map on this employee' : undefined}
+                  >
+                    <span className="map-avatar">{member.full_name.slice(0, 1).toUpperCase()}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="map-employee-name">
+                        {member.full_name}
+                        {member.has_tamper_alert && <AlertTriangle className="inline w-3 h-3 text-red-500 ml-1 align-text-bottom" aria-label="Tamper alert" />}
+                      </span>
+                      <span className="map-employee-location">
+                        {member.current_location?.address_name || (isOnShift(member) ? 'Waiting for GPS' : 'No location received today')}
+                      </span>
+                      <span className="map-employee-meta">
+                        <i style={{ background: meta.color }} /> {meta.label}
+                        {freshness !== 'idle' && <span className={`map-fresh-pill is-${freshness}`}>{label}</span>}
+                        {member.current_location && <> · {formatTime(member.current_location.last_ping_at, timeZone)}</>}
+                      </span>
                     </span>
-                    <span className="map-employee-meta">
-                      <i style={{ background: meta.color }} /> {meta.label}
-                      {member.current_location && <> · {formatTime(member.current_location.last_ping_at)}</>}
-                    </span>
-                  </span>
-                  <Route className="w-4 h-4 text-slate-400" />
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    className="map-employee-trail"
+                    onClick={() => openDay(member.user_id)}
+                    title="Open full-day trail"
+                    aria-label={`Open full-day trail for ${member.full_name}`}
+                  >
+                    <Route className="w-4 h-4" />
+                  </button>
+                </div>
               );
             })}
+            {mode === 'DAY' && !selectedUser && (
+              <div className="map-employee-card">
+                <span className="map-avatar">{dayName.slice(0, 1).toUpperCase()}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="map-employee-name">{dayName}</span>
+                  <span className="map-employee-location">{loading ? 'Loading roster…' : 'Not in today\'s live roster'}</span>
+                </span>
+              </div>
+            )}
+            {mode === 'LIVE' && !loading && team.length === 0 && !error && (
+              <p className="text-[11px] text-slate-500 px-2 py-4 text-center">No employees yet. Add staff on the Employees page.</p>
+            )}
           </div>
 
           {mode === 'LIVE' && (
             <div className="map-roster-help">
               <Navigation className="w-4 h-4" />
-              <span>Hover an employee or map dot for details. Click either to open the full-day trail.</span>
+              <span>Hover to highlight, click to centre the map. Use the trail button (or click a marker) for the full-day route.</span>
             </div>
           )}
 
@@ -468,7 +730,7 @@ export default function LiveMapPage() {
         </aside>
 
         <div className="map-canvas-wrap">
-          <div ref={mapNodeRef} className="map-canvas" aria-label={mode === 'LIVE' ? 'Live employee map' : 'Employee full-day route map'} />
+          <div ref={mapNodeRef} className="map-canvas" role="region" aria-label={mode === 'LIVE' ? 'Live employee map' : 'Employee full-day route map'} />
           {!mapReady && <div className="map-loading"><RefreshCw className="w-5 h-5 animate-spin" /> Loading map…</div>}
           {routeLoading && <div className="map-route-loading"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading day trail</div>}
 
@@ -476,14 +738,14 @@ export default function LiveMapPage() {
             <div className="map-empty-state">
               <Users className="w-7 h-7" />
               <strong>No live positions yet</strong>
-              <span>Employees appear here after the mobile app uploads a GPS waypoint.</span>
+              <span>Employees appear here once they check in on the Android app and the first GPS point arrives.</span>
             </div>
           )}
-          {mode === 'DAY' && !routeLoading && playback && playback.waypoints.length === 0 && playback.stops.length === 0 && (
+          {mode === 'DAY' && !routeLoading && !routeError && playback && playback.waypoints.length === 0 && playback.stops.length === 0 && (
             <div className="map-empty-state">
               <Route className="w-7 h-7" />
               <strong>No route recorded for this day</strong>
-              <span>Choose another date or confirm that route tracking uploaded waypoints.</span>
+              <span>Choose another date, or confirm the employee was checked in with location enabled.</span>
             </div>
           )}
 
@@ -492,7 +754,9 @@ export default function LiveMapPage() {
               <>
                 <span><i style={{ background: '#16a34a' }} /> On duty</span>
                 <span><i style={{ background: '#d97706' }} /> Break</span>
-                <span><i style={{ background: '#94a3b8' }} /> Offline</span>
+                <span><i style={{ background: '#fbbf24' }} /> Stale</span>
+                <span><i style={{ background: '#ef4444' }} /> GPS/Net lost</span>
+                <span><i style={{ background: '#94a3b8' }} /> Off duty</span>
               </>
             ) : (
               <>
@@ -506,5 +770,13 @@ export default function LiveMapPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+export default function LiveMapPage() {
+  return (
+    <Suspense fallback={<div className="map-page text-xs text-[#6B7280] p-4">Loading map…</div>}>
+      <LiveMapInner />
+    </Suspense>
   );
 }

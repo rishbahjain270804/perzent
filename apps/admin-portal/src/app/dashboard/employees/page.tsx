@@ -1,543 +1,780 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Users,
   UserPlus,
   Smartphone,
   RotateCcw,
-  CheckCircle2,
-  X,
   Shield,
-  CreditCard,
-  Receipt,
-  Search,
   RefreshCw,
+  KeyRound,
+  Pencil,
+  UserX,
+  UserCheck,
+  Wand2,
+  Plus,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+import { apiFetch, errorMessage, relativeTime } from '@/lib/client';
 import {
-  EMPLOYEE_BASE_PRICE_INR,
-  GST_AMOUNT_INR,
-  EMPLOYEE_TOTAL_PRICE_INR,
-} from '@perzent/shared-types';
-import { load } from '@cashfreepayments/cashfree-js';
+  PageHeader,
+  StatCard,
+  StatusBadge,
+  Modal,
+  SearchBar,
+  EmptyState,
+  ErrorBanner,
+  LoadingRows,
+  Notice,
+  inputClass,
+  labelClass,
+  helpClass,
+  btnPrimary,
+  btnSecondary,
+  btnGhost,
+  iconBtn,
+  errorText,
+  tableHeadRow,
+  tableRow,
+} from '@/components';
+
+type Role = 'MANAGER' | 'EMPLOYEE';
+type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+
+interface Employee {
+  id: string;
+  full_name: string;
+  email?: string | null;
+  phone: string;
+  role: Role;
+  designation?: string | null;
+  status: UserStatus;
+  manager_id?: string | null;
+  department_id?: string | null;
+  manager_name?: string | null;
+  department_name?: string | null;
+  device_info?: string | null;
+  device_model?: string | null;
+  os_version?: string | null;
+  device_last_seen_at?: string | null;
+  is_device_bound: boolean;
+  created_at: string;
+}
+
+interface Department {
+  id: string;
+  name: string;
+  user_count: number;
+}
+
+type RowAction = 'RESET_DEVICE' | 'SUSPEND' | 'REACTIVATE';
+
+const EMPTY_FORM = {
+  full_name: '',
+  phone: '',
+  email: '',
+  password: '',
+  designation: '',
+  role: 'EMPLOYEE' as Role,
+  department_id: '',
+  manager_id: '',
+};
+
+function generatePassword(length = 8) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const values = new Uint32Array(length);
+  crypto.getRandomValues(values);
+  return Array.from(values, (value) => chars[value % chars.length]).join('');
+}
 
 export default function EmployeesPage() {
-  const [employees, setEmployees] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showCashfreeModal, setShowCashfreeModal] = useState(false);
-  const [paymentStep, setPaymentStep] = useState<'DETAILS' | 'CHECKOUT' | 'SUCCESS'>('DETAILS');
-  const [currentOrder, setCurrentOrder] = useState<any>(null);
-  const [processingPayment, setProcessingPayment] = useState(false);
-  const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [notice, setNotice] = useState('');
+  const [rowError, setRowError] = useState('');
+  const [busyRow, setBusyRow] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState({
-    full_name: '',
-    phone: '',
-    email: '',
-    password: '',
-    designation: '',
-    role: 'EMPLOYEE',
-    department_id: '',
-    manager_id: '',
-  });
-  const [message, setMessage] = useState('');
+  // Add
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [showPassword, setShowPassword] = useState(true);
+  const [addError, setAddError] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [newDeptOpen, setNewDeptOpen] = useState(false);
+  const [newDeptName, setNewDeptName] = useState('');
+  const [creatingDept, setCreatingDept] = useState(false);
+  const [deptError, setDeptError] = useState('');
 
-  const fetchEmployees = () => {
-    fetch('/api/employees')
-      .then((res) => res.json())
-      .then((data) => setEmployees(Array.isArray(data) ? data : []));
-  };
+  // Edit
+  const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({ full_name: '', designation: '', role: 'EMPLOYEE' as Role, manager_id: '', department_id: '', email: '' });
+  const [editError, setEditError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchEmployees();
+  // Reset password
+  const [passwordTarget, setPasswordTarget] = useState<Employee | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+
+  const loadEmployees = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch<Employee[]>('/api/employees');
+      setEmployees(Array.isArray(data) ? data : []);
+      setListError('');
+    } catch (reason) {
+      setListError(errorMessage(reason, 'Could not load employees.'));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleInitiateCashfreePayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setProcessingPayment(true);
-
+  const loadDepartments = useCallback(async () => {
     try {
-      const res = await fetch('/api/payments/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employee_name: formData.full_name,
-          employee_phone: formData.phone,
-          employee_email: formData.email,
-          employee_password: formData.password,
-          employee_designation: formData.designation,
-          employee_role: formData.role,
-          employee_department_id: formData.department_id,
-          employee_manager_id: formData.manager_id,
-        }),
-      });
+      const data = await apiFetch<Department[]>('/api/departments');
+      setDepartments(Array.isArray(data) ? data : []);
+    } catch {
+      /* Department list is optional for the form; errors surface on create. */
+    }
+  }, []);
 
-      const data = await res.json();
-      if (res.ok) {
-        setCurrentOrder(data);
-        setPaymentStep('CHECKOUT');
-      } else {
-        alert(data.error || 'Failed to initialize Cashfree payment order');
-      }
-    } catch (err: any) {
-      alert('Error communicating with Cashfree PG: ' + err.message);
+  useEffect(() => {
+    loadEmployees();
+    loadDepartments();
+  }, [loadEmployees, loadDepartments]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 8000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  const managers = useMemo(() => employees.filter((e) => e.role === 'MANAGER' && e.status !== 'TERMINATED'), [employees]);
+
+  const filteredEmployees = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter(
+      (e) =>
+        e.full_name?.toLowerCase().includes(q) ||
+        e.phone?.toLowerCase().includes(q) ||
+        e.email?.toLowerCase().includes(q) ||
+        e.designation?.toLowerCase().includes(q) ||
+        e.department_name?.toLowerCase().includes(q)
+    );
+  }, [employees, searchQuery]);
+
+  const stats = {
+    total: employees.filter((e) => e.status !== 'TERMINATED').length,
+    managers: employees.filter((e) => e.role === 'MANAGER' && e.status !== 'TERMINATED').length,
+    bound: employees.filter((e) => e.is_device_bound).length,
+    suspended: employees.filter((e) => e.status === 'SUSPENDED').length,
+  };
+
+  /* ---------------- Add ---------------- */
+
+  const openAdd = () => {
+    setForm({ ...EMPTY_FORM, password: generatePassword() });
+    setAddError('');
+    setNewDeptOpen(false);
+    setNewDeptName('');
+    setDeptError('');
+    setAddOpen(true);
+  };
+
+  const handleCreateDepartment = async () => {
+    const name = newDeptName.trim();
+    if (!name) {
+      setDeptError('Enter a department name.');
+      return;
+    }
+    setCreatingDept(true);
+    setDeptError('');
+    try {
+      const created = await apiFetch<Department>('/api/departments', { method: 'POST', json: { name } });
+      setDepartments((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setForm((current) => ({ ...current, department_id: created.id }));
+      setNewDeptOpen(false);
+      setNewDeptName('');
+    } catch (reason) {
+      setDeptError(errorMessage(reason, 'Could not create the department.'));
     } finally {
-      setProcessingPayment(false);
+      setCreatingDept(false);
     }
   };
 
-  const handleCompleteCashfreePayment = async () => {
-    if (!currentOrder) return;
-    setProcessingPayment(true);
-
+  const handleAdd = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAddError('');
+    if (form.password.length < 6) {
+      setAddError('Temporary password must be at least 6 characters.');
+      return;
+    }
+    setAdding(true);
     try {
-      const cashfree = await load({ mode: currentOrder.cashfree_mode || 'sandbox' });
-      if (!cashfree) throw new Error('Cashfree checkout could not be loaded');
-      const checkout = await cashfree.checkout({
-        paymentSessionId: currentOrder.payment_session_id,
-        redirectTarget: '_modal',
-      });
-      if (checkout.error && !checkout.paymentDetails) {
-        throw new Error(checkout.error.message || 'Checkout was cancelled');
-      }
-      const res = await fetch('/api/payments/verify', {
+      const created = await apiFetch<Employee>('/api/employees', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          order_id: currentOrder.order_id,
-        }),
+        json: {
+          full_name: form.full_name.trim(),
+          phone: form.phone.trim(),
+          email: form.email.trim() || undefined,
+          password: form.password,
+          designation: form.designation.trim(),
+          role: form.role,
+          department_id: form.department_id || undefined,
+          manager_id: form.manager_id || undefined,
+        },
       });
-
-      const verifyData = await res.json();
-      if (res.ok && verifyData.success) {
-        setLastInvoice(verifyData);
-        setPaymentStep('SUCCESS');
-        fetchEmployees();
-      } else {
-        alert(verifyData.error || 'Cashfree payment verification failed');
-      }
-    } catch (err: any) {
-      alert('Verification request failed: ' + err.message);
+      setAddOpen(false);
+      setNotice(
+        `${created?.full_name || form.full_name} added. Share the phone number ${form.phone.trim()} and temporary password "${form.password}" with them — they sign in on the Android app.`
+      );
+      await loadEmployees();
+      loadDepartments();
+    } catch (reason) {
+      setAddError(errorMessage(reason, 'Could not add the employee.'));
     } finally {
-      setProcessingPayment(false);
+      setAdding(false);
     }
   };
 
-  const handleResetDevice = async (userId: string) => {
-    if (!confirm('Are you sure you want to unbind this employee’s device lock?')) return;
-    const res = await fetch('/api/employees', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: userId, action: 'RESET_DEVICE' }),
+  /* ---------------- Row actions ---------------- */
+
+  const runRowAction = async (employee: Employee, action: RowAction) => {
+    const confirmations: Record<RowAction, string | null> = {
+      RESET_DEVICE: `Unbind ${employee.full_name}'s phone? They will need to sign in again on the app, and the next phone they use becomes their bound device.`,
+      SUSPEND: `Suspend ${employee.full_name}? They will be signed out and cannot check in until reactivated.`,
+      REACTIVATE: null,
+    };
+    const message = confirmations[action];
+    if (message && !confirm(message)) return;
+    setBusyRow(employee.id);
+    setRowError('');
+    try {
+      await apiFetch('/api/employees', { method: 'PATCH', json: { action, id: employee.id } });
+      setNotice(
+        action === 'RESET_DEVICE'
+          ? `Device binding reset for ${employee.full_name}.`
+          : action === 'SUSPEND'
+            ? `${employee.full_name} suspended.`
+            : `${employee.full_name} reactivated.`
+      );
+      await loadEmployees();
+    } catch (reason) {
+      setRowError(errorMessage(reason, 'Action failed.'));
+    } finally {
+      setBusyRow(null);
+    }
+  };
+
+  /* ---------------- Edit ---------------- */
+
+  const openEdit = (employee: Employee) => {
+    setEditTarget(employee);
+    setEditForm({
+      full_name: employee.full_name || '',
+      designation: employee.designation || '',
+      role: employee.role,
+      manager_id: employee.manager_id || '',
+      department_id: employee.department_id || '',
+      email: employee.email || '',
     });
-    if (res.ok) {
-      setMessage('Device binding reset successfully.');
-      fetchEmployees();
-      setTimeout(() => setMessage(''), 3000);
+    setEditError('');
+  };
+
+  const handleEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editTarget) return;
+    setSaving(true);
+    setEditError('');
+    try {
+      await apiFetch('/api/employees', {
+        method: 'PATCH',
+        json: {
+          action: 'UPDATE',
+          id: editTarget.id,
+          full_name: editForm.full_name.trim(),
+          designation: editForm.designation.trim(),
+          role: editForm.role,
+          manager_id: editForm.manager_id || null,
+          department_id: editForm.department_id || null,
+          email: editForm.email.trim() || undefined,
+        },
+      });
+      setEditTarget(null);
+      setNotice(`${editForm.full_name.trim()} updated.`);
+      await loadEmployees();
+      loadDepartments();
+    } catch (reason) {
+      setEditError(errorMessage(reason, 'Could not save changes.'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const filteredEmployees = employees.filter(
-    (e) =>
-      e.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.designation?.toLowerCase().includes(searchQuery.toLowerCase())
+  /* ---------------- Reset password ---------------- */
+
+  const openPasswordReset = (employee: Employee) => {
+    setPasswordTarget(employee);
+    setNewPassword(generatePassword());
+    setPasswordError('');
+  };
+
+  const handleResetPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!passwordTarget) return;
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters.');
+      return;
+    }
+    setResettingPassword(true);
+    setPasswordError('');
+    try {
+      await apiFetch('/api/employees', {
+        method: 'PATCH',
+        json: { action: 'RESET_PASSWORD', id: passwordTarget.id, new_password: newPassword },
+      });
+      setNotice(`Password reset for ${passwordTarget.full_name}. New temporary password: "${newPassword}".`);
+      setPasswordTarget(null);
+    } catch (reason) {
+      setPasswordError(errorMessage(reason, 'Could not reset the password.'));
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
+  /* ---------------- Render helpers ---------------- */
+
+  const deviceCell = (employee: Employee) => {
+    if (!employee.is_device_bound) {
+      return <span className="text-[11px] text-slate-500 italic">No device yet</span>;
+    }
+    return (
+      <div className="flex items-center gap-1.5 text-emerald-400 min-w-0">
+        <Smartphone className="w-3.5 h-3.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[11px] text-slate-300 leading-tight truncate">{employee.device_model || 'Bound device'}</p>
+          <p className="text-[10px] text-[#6B7280] leading-tight">
+            {employee.os_version ? `Android ${employee.os_version} · ` : ''}seen {relativeTime(employee.device_last_seen_at)}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  const rowActions = (employee: Employee) => {
+    const busy = busyRow === employee.id;
+    const terminated = employee.status === 'TERMINATED';
+    return (
+      <div className="flex flex-wrap justify-end gap-1">
+        <button type="button" onClick={() => openEdit(employee)} disabled={busy || terminated} className={btnGhost} title="Edit">
+          <Pencil className="w-3 h-3" /> Edit
+        </button>
+        <button type="button" onClick={() => openPasswordReset(employee)} disabled={busy || terminated} className={btnGhost} title="Reset password">
+          <KeyRound className="w-3 h-3" /> Password
+        </button>
+        {employee.is_device_bound && (
+          <button type="button" onClick={() => runRowAction(employee, 'RESET_DEVICE')} disabled={busy} className={btnGhost} title="Reset device binding">
+            <RotateCcw className="w-3 h-3 text-amber-400" /> Reset device
+          </button>
+        )}
+        {employee.status === 'SUSPENDED' ? (
+          <button type="button" onClick={() => runRowAction(employee, 'REACTIVATE')} disabled={busy} className={btnGhost}>
+            <UserCheck className="w-3 h-3 text-emerald-400" /> Reactivate
+          </button>
+        ) : (
+          !terminated && (
+            <button type="button" onClick={() => runRowAction(employee, 'SUSPEND')} disabled={busy} className={btnGhost}>
+              <UserX className="w-3 h-3 text-red-400" /> Suspend
+            </button>
+          )
+        )}
+        {busy && <RefreshCw className="w-3 h-3 animate-spin text-slate-400 self-center" aria-label="Working" />}
+      </div>
+    );
+  };
+
+  const passwordField = (
+    value: string,
+    onChange: (value: string) => void,
+    onGenerate: () => void,
+    id: string
+  ) => (
+    <div className="flex gap-1.5">
+      <div className="relative flex-1">
+        <input
+          id={id}
+          type={showPassword ? 'text' : 'password'}
+          required
+          minLength={6}
+          autoComplete="new-password"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="At least 6 characters"
+          className={`${inputClass} pr-8 font-mono`}
+        />
+        <button
+          type="button"
+          onClick={() => setShowPassword((current) => !current)}
+          aria-label={showPassword ? 'Hide password' : 'Show password'}
+          className="absolute right-2 top-1.5 text-slate-500 hover:text-white"
+        >
+          {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+      <button type="button" onClick={onGenerate} className={btnSecondary} title="Generate a random password">
+        <Wand2 className="w-3 h-3" /> Generate
+      </button>
+    </div>
+  );
+
+  const departmentSelect = (value: string, onChange: (value: string) => void, allowCreate: boolean) => (
+    <div className="space-y-1.5">
+      <select value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+        <option value="">No department</option>
+        {departments.map((dept) => (
+          <option key={dept.id} value={dept.id}>{dept.name}</option>
+        ))}
+      </select>
+      {allowCreate && !newDeptOpen && (
+        <button type="button" onClick={() => setNewDeptOpen(true)} className="text-[10px] text-[#86EFAC] hover:underline inline-flex items-center gap-0.5">
+          <Plus className="w-3 h-3" /> New department
+        </button>
+      )}
+      {allowCreate && newDeptOpen && (
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={newDeptName}
+            onChange={(event) => setNewDeptName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleCreateDepartment();
+              }
+            }}
+            placeholder="e.g. Sales — North"
+            className={inputClass}
+            aria-label="New department name"
+          />
+          <button type="button" onClick={handleCreateDepartment} disabled={creatingDept} className={btnSecondary}>
+            {creatingDept ? 'Adding…' : 'Add'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setNewDeptOpen(false);
+              setDeptError('');
+            }}
+            className={btnGhost}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {deptError && <p className={errorText}>{deptError}</p>}
+    </div>
+  );
+
+  const managerSelect = (value: string, onChange: (value: string) => void, excludeId?: string) => (
+    <select value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+      <option value="">No manager</option>
+      {managers
+        .filter((manager) => manager.id !== excludeId)
+        .map((manager) => (
+          <option key={manager.id} value={manager.id}>{manager.full_name}</option>
+        ))}
+    </select>
   );
 
   return (
-    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h1 className="text-sm md:text-base font-bold dashboard-strong tracking-tight">Employee Directory & Licenses</h1>
-          <p className="text-[10px] md:text-[11px] text-[#6B7280]">
-            Field profiles, hardware UUID locks, and seat provisioning (₹116.82 / seat)
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 self-start sm:self-auto">
-          <button
-            onClick={fetchEmployees}
-            className="p-1.5 rounded border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white transition"
-            title="Refresh List"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => {
-              setPaymentStep('DETAILS');
-              setShowCashfreeModal(true);
-            }}
-            className="px-2.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
-          >
-            <UserPlus className="w-3.5 h-3.5" /> Add Employee (₹116.82)
-          </button>
-        </div>
-      </div>
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
+      <PageHeader
+        title="Employees"
+        description="Staff accounts for the Android app. Adding people is free — no seat limits."
+        actions={
+          <>
+            <button onClick={loadEmployees} disabled={loading} className={iconBtn} title="Refresh list" aria-label="Refresh list">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={openAdd} className={btnPrimary}>
+              <UserPlus className="w-3.5 h-3.5" /> Add employee
+            </button>
+          </>
+        }
+      />
 
-      {message && (
-        <div className="p-2 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC] text-xs font-medium">
-          {message}
-        </div>
-      )}
+      {notice && <Notice onDismiss={() => setNotice('')}>{notice}</Notice>}
+      <ErrorBanner message={listError} onRetry={loadEmployees} retrying={loading} />
+      <ErrorBanner message={rowError} />
 
-      {/* 4-Cell Metric Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-[#6B7280] text-[10px] uppercase font-semibold">Total Employees</span>
-          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">{employees.length}</p>
-          <span className="text-[10px] text-[#6B7280]">Enrolled personnel</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-emerald-400 text-[10px] uppercase font-semibold">Active Paid Seats</span>
-          <p className="text-lg md:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums">{employees.length}</p>
-          <span className="text-[10px] text-[#6B7280]">Cashfree authorized</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-blue-400 text-[10px] uppercase font-semibold">Bound Devices</span>
-          <p className="text-lg md:text-xl font-bold text-blue-400 mt-0.5 tabular-nums">
-            {employees.filter((e) => e.device_uuid).length}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">Hardware UUID locked</span>
-        </div>
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-slate-400 text-[10px] uppercase font-semibold">Base License Fee</span>
-          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">₹99.00</p>
-          <span className="text-[10px] text-[#6B7280]">₹116.82 incl. 18% GST</span>
-        </div>
+        <StatCard label="Total staff" value={stats.total} icon={Users} hint="Active + suspended" />
+        <StatCard label="Managers" value={stats.managers} icon={Shield} tone="info" />
+        <StatCard label="Devices bound" value={stats.bound} icon={Smartphone} tone="success" hint="Signed in on the app" />
+        <StatCard label="Suspended" value={stats.suspended} icon={UserX} tone={stats.suspended > 0 ? 'warning' : 'default'} />
       </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search name, phone..."
-            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-700 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-          />
-        </div>
-        <span className="text-[10px] md:text-[11px] text-[#6B7280]">{filteredEmployees.length} reps</span>
-      </div>
+      <SearchBar
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search name, phone, email, department…"
+        meta={`${filteredEmployees.length} of ${employees.length}`}
+      />
 
       {/* ─── Mobile Card List ─── */}
       <div className="md:hidden space-y-2">
+        {loading && <div className="dashboard-card rounded-lg"><LoadingRows rows={3} /></div>}
         {filteredEmployees.map((emp) => (
           <div key={emp.id} className="dashboard-card rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-7 h-7 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px] shrink-0">
                   {emp.full_name?.charAt(0) || 'E'}
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold text-xs dashboard-strong truncate">{emp.full_name}</p>
-                  <p className="text-[10px] text-[#6B7280] truncate">{emp.designation || 'Representative'}</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">
+                    {emp.designation || 'Staff'}{emp.department_name ? ` · ${emp.department_name}` : ''}
+                  </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30 shrink-0">
-                <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid
-              </span>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <StatusBadge status={emp.status} />
+                <StatusBadge status={emp.role} />
+              </div>
             </div>
-
-            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-300">
+            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2 text-[11px] text-slate-300">
               <span className="font-mono text-[10px]">{emp.phone}</span>
-              {emp.device_uuid ? (
-                <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                  <Smartphone className="w-3 h-3" /> {emp.device_model || 'Bound'}
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-500 italic">No Device</span>
-              )}
+              {deviceCell(emp)}
             </div>
-
-            <div className="pt-1.5 flex justify-end gap-1.5 border-t border-slate-800/40">
-              {emp.device_uuid && (
-                <button
-                  onClick={() => handleResetDevice(emp.id)}
-                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center gap-1"
-                >
-                  <RotateCcw className="w-3 h-3 text-amber-400" /> Reset Lock
-                </button>
-              )}
-              <Link
-                href={`/dashboard/routes?user_id=${emp.id}`}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition"
-              >
-                Trail →
-              </Link>
-            </div>
+            {emp.manager_name && <p className="text-[10px] text-[#6B7280]">Reports to {emp.manager_name}</p>}
+            <div className="pt-1.5 border-t border-slate-800/40">{rowActions(emp)}</div>
           </div>
         ))}
-        {filteredEmployees.length === 0 && (
-          <p className="text-center text-[#6B7280] text-[11px] py-8">No employees found.</p>
+        {!loading && filteredEmployees.length === 0 && !listError && (
+          <div className="dashboard-card rounded-lg">
+            <EmptyState
+              icon={Users}
+              title={employees.length === 0 ? 'No employees yet' : 'No matches'}
+              description={
+                employees.length === 0
+                  ? 'Add your first employee. They sign in on the Android app with their phone number and the temporary password.'
+                  : 'Try a different search.'
+              }
+              action={employees.length === 0 ? <button onClick={openAdd} className={btnPrimary}><UserPlus className="w-3.5 h-3.5" /> Add employee</button> : undefined}
+              compact
+            />
+          </div>
         )}
       </div>
 
       {/* ─── Desktop Table ─── */}
       <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
-                <th className="px-3 py-2">Representative</th>
-                <th className="px-3 py-2">Phone & Email</th>
-                <th className="px-3 py-2">Designation</th>
-                <th className="px-3 py-2">Role</th>
-                <th className="px-3 py-2">Hardware Binding</th>
-                <th className="px-3 py-2">Seat Status</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/40">
-              {filteredEmployees.map((emp) => (
-                <tr key={emp.id} className="hover:bg-slate-800/20 transition">
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px]">
-                        {emp.full_name?.charAt(0)}
-                      </div>
-                      <span className="font-semibold dashboard-strong">{emp.full_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
-                    <p className="leading-tight">{emp.phone}</p>
-                    <p className="text-[10px] text-[#6B7280] leading-tight">{emp.email}</p>
-                  </td>
-                  <td className="px-3 py-2 text-slate-300">{emp.designation || 'Representative'}</td>
-                  <td className="px-3 py-2">
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
-                      {emp.role}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {emp.device_uuid ? (
-                      <div className="flex items-center gap-1.5 text-emerald-400">
-                        <Smartphone className="w-3.5 h-3.5" />
-                        <div>
-                          <p className="text-[11px] font-mono text-slate-300 leading-tight">{emp.device_model || 'Bound Device'}</p>
-                          <p className="text-[9px] text-[#6B7280] truncate max-w-[120px] font-mono">{emp.device_uuid}</p>
+        {loading ? (
+          <LoadingRows rows={5} />
+        ) : filteredEmployees.length === 0 ? (
+          !listError && (
+            <EmptyState
+              icon={Users}
+              title={employees.length === 0 ? 'No employees yet' : 'No matches'}
+              description={
+                employees.length === 0
+                  ? 'Add your first employee. They sign in on the Android app with their phone number and the temporary password you give them.'
+                  : 'Try a different search.'
+              }
+              action={employees.length === 0 ? <button onClick={openAdd} className={btnPrimary}><UserPlus className="w-3.5 h-3.5" /> Add employee</button> : undefined}
+            />
+          )
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className={tableHeadRow}>
+                  <th className="px-3 py-2">Employee</th>
+                  <th className="px-3 py-2">Contact</th>
+                  <th className="px-3 py-2">Role</th>
+                  <th className="px-3 py-2">Department / manager</th>
+                  <th className="px-3 py-2">Device</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {filteredEmployees.map((emp) => (
+                  <tr key={emp.id} className={tableRow}>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded bg-[#16A34A]/20 text-[#86EFAC] font-bold flex items-center justify-center text-[10px] shrink-0">
+                          {emp.full_name?.charAt(0)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold dashboard-strong leading-tight">{emp.full_name}</p>
+                          <p className="text-[10px] text-[#6B7280] leading-tight">{emp.designation || 'Staff'}</p>
                         </div>
                       </div>
-                    ) : (
-                      <span className="text-[11px] text-slate-500 italic">No Device Bound</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                      <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid (₹116.82)
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right space-x-1">
-                    {emp.device_uuid && (
-                      <button
-                        onClick={() => handleResetDevice(emp.id)}
-                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center gap-1"
-                        title="Unbind Device Lock"
-                      >
-                        <RotateCcw className="w-3 h-3 text-amber-400" /> Reset
-                      </button>
-                    )}
-                    <Link
-                      href={`/dashboard/routes?user_id=${emp.id}`}
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium transition inline-flex items-center"
-                    >
-                      Routes
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
+                      <p className="leading-tight">{emp.phone}</p>
+                      <p className="text-[10px] text-[#6B7280] leading-tight">{emp.email || '—'}</p>
+                    </td>
+                    <td className="px-3 py-2"><StatusBadge status={emp.role} /></td>
+                    <td className="px-3 py-2 text-[11px] text-slate-300">
+                      <p className="leading-tight">{emp.department_name || <span className="text-slate-500">No department</span>}</p>
+                      <p className="text-[10px] text-[#6B7280] leading-tight">{emp.manager_name ? `Reports to ${emp.manager_name}` : 'No manager'}</p>
+                    </td>
+                    <td className="px-3 py-2">{deviceCell(emp)}</td>
+                    <td className="px-3 py-2"><StatusBadge status={emp.status} /></td>
+                    <td className="px-3 py-2 text-right">{rowActions(emp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Minimalist Cashfree Provisioning Modal */}
-      {showCashfreeModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 z-50">
-          <div className="max-w-md w-full dashboard-card rounded-lg p-4 sm:p-5 shadow-2xl space-y-3 text-xs">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-[#16A34A] text-white font-bold flex items-center justify-center text-xs">
-                  P
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm dashboard-strong">Provision Field Seat</h3>
-                  <p className="text-[10px] text-[#6B7280]">Cashfree PG (₹99.00 + 18% GST)</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowCashfreeModal(false)}
-                className="p-1 rounded text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <p className="text-[10px] text-[#6B7280]">
+        Employees install the app from the <Link href="/download" className="underline">download page</Link> and sign in with their phone number.
+      </p>
 
-            {paymentStep === 'DETAILS' && (
-              <form onSubmit={handleInitiateCashfreePayment} className="space-y-2.5">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Ramesh Kumar"
-                    value={formData.full_name}
-                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Phone (Login)</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="+91 98765 43210"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Designation</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Sales Rep"
-                      value={formData.designation}
-                      onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                      className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Email</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="ramesh@acmelogistics.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Temporary Password</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    placeholder="At least 8 characters"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded border border-slate-700 bg-slate-900 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-                  />
-                </div>
-
-                {/* Price Breakdown Box */}
-                <div className="p-2.5 rounded border border-slate-800 bg-slate-900/60 space-y-1 text-[11px]">
-                  <div className="flex justify-between text-slate-300">
-                    <span>Base Seat Fee:</span>
-                    <span className="font-mono">₹{EMPLOYEE_BASE_PRICE_INR.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-emerald-400">
-                    <span>18% GST:</span>
-                    <span className="font-mono">+₹{GST_AMOUNT_INR.toFixed(2)}</span>
-                  </div>
-                  <div className="pt-1 border-t border-slate-800 flex justify-between font-bold text-xs">
-                    <span>Total Payable:</span>
-                    <span className="text-emerald-400 font-mono">₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCashfreeModal(false)}
-                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={processingPayment}
-                    className="px-3.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    {processingPayment ? 'Connecting...' : 'Authorize & Pay ₹116.82'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {paymentStep === 'CHECKOUT' && currentOrder && (
-              <div className="space-y-3">
-                <div className="p-2.5 rounded border border-slate-800 bg-slate-900/60 space-y-1 font-mono text-[11px]">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Cashfree Order:</span>
-                    <span className="text-white truncate max-w-[180px]">{currentOrder.order_id}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Amount:</span>
-                    <span className="font-bold text-emerald-400">₹{currentOrder.order_amount?.toFixed(2)}</span>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-slate-400">Cashfree will open its secure hosted checkout with UPI, cards, and net banking options.</p>
-
-                <div className="pt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentStep('DETAILS')}
-                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={handleCompleteCashfreePayment}
-                    disabled={processingPayment}
-                    className="px-3.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    {processingPayment ? 'Verifying...' : `Pay ₹${EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)}`}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {paymentStep === 'SUCCESS' && lastInvoice && (
-              <div className="space-y-3 text-center py-2">
-                <div className="w-9 h-9 rounded-full bg-[#16A34A]/20 text-[#16A34A] mx-auto flex items-center justify-center">
-                  <CheckCircle2 className="w-5 h-5 text-[#16A34A]" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-sm dashboard-strong">Employee Seat Provisioned!</h4>
-                  <p className="text-[10px] text-[#6B7280] mt-0.5">
-                    Invoice <span className="font-mono text-slate-200">{lastInvoice.invoice_number}</span> recorded
-                  </p>
-                </div>
-                <div className="pt-2 flex justify-center gap-2">
-                  <button
-                    onClick={() => setShowCashfreeModal(false)}
-                    className="px-3.5 py-1.5 rounded bg-[#16A34A] text-white text-xs font-semibold"
-                  >
-                    Done
-                  </button>
-                  <Link
-                    href="/dashboard/billing"
-                    className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-                  >
-                    View Invoices
-                  </Link>
-                </div>
-              </div>
-            )}
+      {/* ─── Add employee ─── */}
+      <Modal
+        open={addOpen}
+        onClose={() => !adding && setAddOpen(false)}
+        title="Add employee"
+        description="Free — no payment. They sign in on the Android app with the phone number and temporary password."
+      >
+        <form onSubmit={handleAdd} className="space-y-2.5" noValidate>
+          <div>
+            <label htmlFor="add_full_name" className={labelClass}>Full name</label>
+            <input id="add_full_name" type="text" required minLength={2} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="e.g. Ramesh Kumar" className={inputClass} />
           </div>
-        </div>
-      )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="add_phone" className={labelClass}>Phone (login)</label>
+              <input id="add_phone" type="tel" inputMode="tel" required minLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="9876543210" className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="add_designation" className={labelClass}>Designation</label>
+              <input id="add_designation" type="text" required minLength={2} value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="Sales executive" className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="add_email" className={labelClass}>Email <span className="font-normal text-slate-500">(optional)</span></label>
+            <input id="add_email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="ramesh@company.com" className={inputClass} />
+          </div>
+          <div>
+            <label htmlFor="add_password" className={labelClass}>Temporary password</label>
+            {passwordField(form.password, (value) => setForm({ ...form, password: value }), () => setForm({ ...form, password: generatePassword() }), 'add_password')}
+            <p className={helpClass}>Minimum 6 characters. Share it with the employee; they can change it in the app.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="add_role" className={labelClass}>Role</label>
+              <select id="add_role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={inputClass}>
+                <option value="EMPLOYEE">Employee</option>
+                <option value="MANAGER">Manager</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Manager <span className="font-normal text-slate-500">(optional)</span></label>
+              {managerSelect(form.manager_id, (value) => setForm({ ...form, manager_id: value }))}
+            </div>
+          </div>
+          <div>
+            <label className={labelClass}>Department <span className="font-normal text-slate-500">(optional)</span></label>
+            {departmentSelect(form.department_id, (value) => setForm({ ...form, department_id: value }), true)}
+          </div>
+
+          {addError && <p role="alert" className={errorText}>{addError}</p>}
+
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setAddOpen(false)} disabled={adding} className={btnSecondary}>Cancel</button>
+            <button
+              type="submit"
+              disabled={adding || !form.full_name.trim() || !form.phone.trim() || !form.designation.trim() || form.password.length < 6}
+              className={btnPrimary}
+            >
+              {adding ? 'Adding…' : 'Add employee'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ─── Edit employee ─── */}
+      <Modal open={!!editTarget} onClose={() => !saving && setEditTarget(null)} title={editTarget ? `Edit ${editTarget.full_name}` : 'Edit employee'}>
+        <form onSubmit={handleEdit} className="space-y-2.5" noValidate>
+          <div>
+            <label htmlFor="edit_full_name" className={labelClass}>Full name</label>
+            <input id="edit_full_name" type="text" required minLength={2} value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} className={inputClass} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="edit_designation" className={labelClass}>Designation</label>
+              <input id="edit_designation" type="text" required minLength={2} value={editForm.designation} onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="edit_role" className={labelClass}>Role</label>
+              <select id="edit_role" value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as Role })} className={inputClass}>
+                <option value="EMPLOYEE">Employee</option>
+                <option value="MANAGER">Manager</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="edit_email" className={labelClass}>Email <span className="font-normal text-slate-500">(optional)</span></label>
+            <input id="edit_email" type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className={inputClass} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass}>Manager</label>
+              {managerSelect(editForm.manager_id, (value) => setEditForm({ ...editForm, manager_id: value }), editTarget?.id)}
+            </div>
+            <div>
+              <label className={labelClass}>Department</label>
+              {departmentSelect(editForm.department_id, (value) => setEditForm({ ...editForm, department_id: value }), false)}
+            </div>
+          </div>
+          {editError && <p role="alert" className={errorText}>{editError}</p>}
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setEditTarget(null)} disabled={saving} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={saving || !editForm.full_name.trim() || !editForm.designation.trim()} className={btnPrimary}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ─── Reset password ─── */}
+      <Modal
+        open={!!passwordTarget}
+        onClose={() => !resettingPassword && setPasswordTarget(null)}
+        title={passwordTarget ? `Reset password — ${passwordTarget.full_name}` : 'Reset password'}
+        description="Sets a new temporary password. The employee will need to sign in again on the app."
+        size="sm"
+      >
+        <form onSubmit={handleResetPassword} className="space-y-2.5" noValidate>
+          <div>
+            <label htmlFor="reset_password" className={labelClass}>New temporary password</label>
+            {passwordField(newPassword, setNewPassword, () => setNewPassword(generatePassword()), 'reset_password')}
+          </div>
+          {passwordError && <p role="alert" className={errorText}>{passwordError}</p>}
+          <div className="pt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setPasswordTarget(null)} disabled={resettingPassword} className={btnSecondary}>Cancel</button>
+            <button type="submit" disabled={resettingPassword || newPassword.length < 6} className={btnPrimary}>
+              {resettingPassword ? 'Resetting…' : 'Reset password'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

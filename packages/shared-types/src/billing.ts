@@ -5,7 +5,7 @@ export const GST_RATE = 0.18; // 18% Tax
 export const GST_AMOUNT_INR = Number((EMPLOYEE_BASE_PRICE_INR * GST_RATE).toFixed(2)); // 17.82
 export const EMPLOYEE_TOTAL_PRICE_INR = Number((EMPLOYEE_BASE_PRICE_INR + GST_AMOUNT_INR).toFixed(2)); // 116.82
 
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
+export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
 
 export interface PricingBreakdown {
   base_price_inr: number;

@@ -1,4 +1,4 @@
-﻿package app.jspcoders.perzent
+package app.jspcoders.perzent
 
 import android.app.AlarmManager
 import android.app.Notification
@@ -15,9 +15,9 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -36,13 +36,34 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
+/**
+ * Sticky foreground location service used while an employee is checked in.
+ *
+ * Threading model:
+ *  - Location callbacks, notification refreshes and lifecycle run on the main looper.
+ *  - All network I/O and every read/modify/write of the offline queue run on ONE
+ *    single-thread executor; the queue itself is additionally guarded by [queueLock]
+ *    because the companion (called from the React Native thread) also writes it.
+ */
 class PerzentLocationService : Service() {
+
+    data class TrackingState(
+        val trackingActive: Boolean,
+        val authInvalid: Boolean,
+        val shiftEndedRemotely: Boolean,
+        val permissionRevoked: Boolean,
+        val lastFixEpochMs: Long,
+    )
 
     companion object {
         const val TAG = "PerzentLocationService"
@@ -53,31 +74,66 @@ class PerzentLocationService : Service() {
         const val KEY_USER_ID = "user_id"
         const val KEY_API_BASE = "api_base_url"
         const val KEY_TRACKING_ACTIVE = "tracking_active"
+        const val KEY_PUNCH_IN_EPOCH = "punch_in_epoch"
         const val KEY_OFFLINE_WAYPOINTS = "offline_waypoints_queue_v1"
+        const val KEY_AUTH_INVALID = "auth_invalid"
+        const val KEY_SHIFT_ENDED_REMOTELY = "shift_ended_remotely"
+        const val KEY_PERMISSION_REVOKED = "permission_revoked"
+        const val DEFAULT_API_BASE = "https://perzent.vercel.app"
+
         const val MAX_OFFLINE_POINTS = 3000
+        const val MAX_BATCH_SIZE = 500
 
         const val ACTION_START = "app.jspcoders.perzent.ACTION_START_TRACKING"
         const val ACTION_STOP = "app.jspcoders.perzent.ACTION_STOP_TRACKING"
 
-        // High-precision live GPS tracking (3 to 4 seconds) for fluid Swiggy/Zomato/Rapido style live map
-        const val UPDATE_INTERVAL_MS = 4_000L // 4 seconds
-        const val FASTEST_INTERVAL_MS = 2_500L // 2.5 seconds
+        // Fused provider cadence (kept at 3 s for a smooth live map); uploads are coalesced below.
+        const val UPDATE_INTERVAL_MS = 3_000L
+        const val FASTEST_INTERVAL_MS = 1_500L
+        const val MOVING_UPLOAD_INTERVAL_MS = 3_000L
+        const val STATIONARY_UPLOAD_INTERVAL_MS = 15_000L
+        const val STATIONARY_DISTANCE_METERS = 8f
+        const val TELEMETRY_INTERVAL_MS = 45_000L
+        const val NOTIFICATION_REFRESH_MS = 15_000L
+        const val BACKOFF_MIN_MS = 5_000L
+        const val BACKOFF_MAX_MS = 120_000L
 
-        fun startService(context: Context, token: String, userId: String, apiBase: String = "https://perzent.vercel.app") {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString(KEY_TOKEN, token)
-                .putString(KEY_USER_ID, userId)
-                .putString(KEY_API_BASE, apiBase)
-                .putBoolean(KEY_TRACKING_ACTIVE, true)
-                .apply()
+        /** Set by [stopService]; the running instance observes it and shuts down without any service start. */
+        @Volatile private var stopRequested = false
+        @Volatile private var instance: PerzentLocationService? = null
 
-            val intent = Intent(context, PerzentLocationService::class.java).apply {
-                action = ACTION_START
-                putExtra(KEY_TOKEN, token)
-                putExtra(KEY_USER_ID, userId)
-                putExtra(KEY_API_BASE, apiBase)
+        /** Epoch ms of the last GPS fix seen in this process (0 if none). */
+        @Volatile var lastFixEpochMs: Long = 0L
+            private set
+
+        private val queueLock = Any()
+
+        fun prefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        fun startService(
+            context: Context,
+            token: String,
+            userId: String,
+            apiBase: String = DEFAULT_API_BASE,
+            punchInEpochMs: Long = System.currentTimeMillis(),
+        ) {
+            stopRequested = false
+            synchronized(queueLock) {
+                prefs(context).edit()
+                    .putString(KEY_TOKEN, token)
+                    .putString(KEY_USER_ID, userId)
+                    .putString(KEY_API_BASE, apiBase)
+                    .putLong(KEY_PUNCH_IN_EPOCH, punchInEpochMs)
+                    .putBoolean(KEY_TRACKING_ACTIVE, true)
+                    .putBoolean(KEY_AUTH_INVALID, false)
+                    .putBoolean(KEY_SHIFT_ENDED_REMOTELY, false)
+                    .putBoolean(KEY_PERMISSION_REVOKED, false)
+                    // A new shift must never inherit points recorded for an earlier one.
+                    .putString(KEY_OFFLINE_WAYPOINTS, "[]")
+                    .apply()
             }
+            val intent = Intent(context, PerzentLocationService::class.java).apply { action = ACTION_START }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -85,122 +141,230 @@ class PerzentLocationService : Service() {
             }
         }
 
+        /**
+         * Stops tracking. Safe from any thread and any app state and never throws: the running
+         * instance lives in this process, so it is asked to shut down directly instead of
+         * sending a start intent (which is illegal from the background on Android 8+).
+         * If no instance is alive, the prefs flag alone guarantees that any sticky restart
+         * exits immediately in [onStartCommand].
+         */
         fun stopService(context: Context) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putBoolean(KEY_TRACKING_ACTIVE, false).apply()
-
-            val intent = Intent(context, PerzentLocationService::class.java).apply {
-                action = ACTION_STOP
+            stopRequested = true
+            try {
+                prefs(context).edit()
+                    .putBoolean(KEY_TRACKING_ACTIVE, false)
+                    .remove(KEY_TOKEN)
+                    .remove(KEY_USER_ID)
+                    .remove(KEY_PUNCH_IN_EPOCH)
+                    .apply()
+            } catch (e: Exception) {
+                Log.w(TAG, "stopService: prefs update failed: ${e.message}")
             }
-            context.startService(intent)
+            val running = instance ?: return
+            try {
+                running.mainHandler.post { running.shutdown(flushBeforeExit = true) }
+            } catch (e: Exception) {
+                Log.w(TAG, "stopService: could not reach running instance: ${e.message}")
+            }
         }
 
-        fun isTracking(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getBoolean(KEY_TRACKING_ACTIVE, false)
+        fun isTracking(context: Context): Boolean = prefs(context).getBoolean(KEY_TRACKING_ACTIVE, false)
+
+        fun getState(context: Context): TrackingState {
+            val p = prefs(context)
+            return TrackingState(
+                trackingActive = p.getBoolean(KEY_TRACKING_ACTIVE, false),
+                authInvalid = p.getBoolean(KEY_AUTH_INVALID, false),
+                shiftEndedRemotely = p.getBoolean(KEY_SHIFT_ENDED_REMOTELY, false),
+                permissionRevoked = p.getBoolean(KEY_PERMISSION_REVOKED, false),
+                lastFixEpochMs = lastFixEpochMs,
+            )
         }
+
+        fun clearFlags(context: Context) {
+            prefs(context).edit()
+                .putBoolean(KEY_AUTH_INVALID, false)
+                .putBoolean(KEY_SHIFT_ENDED_REMOTELY, false)
+                .putBoolean(KEY_PERMISSION_REVOKED, false)
+                .apply()
+        }
+
+        private fun newUploadExecutor(): ExecutorService =
+            Executors.newSingleThreadExecutor { runnable ->
+                Thread(runnable, "perzent-upload").apply { isDaemon = true }
+            }
     }
+
+    internal val mainHandler = Handler(Looper.getMainLooper())
+    private var uploadExecutor: ExecutorService = newUploadExecutor()
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     private var fusedLocationClient: FusedLocationProviderClient? = null
     private var locationCallback: LocationCallback? = null
     private var locationManager: LocationManager? = null
     private var systemLocationListener: LocationListener? = null
     private var gpsStateReceiver: BroadcastReceiver? = null
-
     private var wakeLock: PowerManager.WakeLock? = null
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
 
-    private var lastTelemetrySendTime = 0L
+    @Volatile private var token: String = ""
+    @Volatile private var userId: String = ""
+    @Volatile private var apiBase: String = DEFAULT_API_BASE
+    @Volatile private var punchInEpochMs: Long = 0L
+
+    // Main-thread state
+    private var lastAcceptedLocation: Location? = null
+    private var lastUploadElapsedMs = 0L
+    private var lastTelemetryElapsedMs = 0L
+    private var gpsProviderOff = false
+    private var isForeground = false
+    private var shuttingDown = false
+    @Volatile private var lastMockFlag = false
+
+    // Retry/backoff state (upload thread), read on main for scheduling
+    private var currentBackoffMs = 0L
+    @Volatile private var retryNotBeforeMs = 0L
+
+    private val notificationRefresh = object : Runnable {
+        override fun run() {
+            if (shuttingDown) return
+            if (stopRequested) {
+                shutdown(flushBeforeExit = true)
+                return
+            }
+            refreshNotification()
+            mainHandler.postDelayed(this, NOTIFICATION_REFRESH_MS)
+        }
+    }
+    private val retryRunnable = Runnable { scheduleFlush() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.i(TAG, "PerzentLocationService onCreate")
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        val p = prefs(this)
+        val active = p.getBoolean(KEY_TRACKING_ACTIVE, false)
 
-        if (action == ACTION_STOP) {
-            Log.i(TAG, "Received ACTION_STOP - Stopping foreground tracking")
-            stopTracking()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        if (intent?.action == ACTION_STOP || stopRequested || !active) {
+            Log.i(TAG, "Stop requested (action=${intent?.action}, stopRequested=$stopRequested, active=$active)")
+            ensureForegroundForStop()
+            shutdown(flushBeforeExit = true)
             return START_NOT_STICKY
         }
 
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val token = intent?.getStringExtra(KEY_TOKEN) ?: prefs.getString(KEY_TOKEN, null)
-        val userId = intent?.getStringExtra(KEY_USER_ID) ?: prefs.getString(KEY_USER_ID, null)
-        val apiBase = intent?.getStringExtra(KEY_API_BASE) ?: prefs.getString(KEY_API_BASE, "https://perzent.vercel.app")
+        val savedToken = p.getString(KEY_TOKEN, null)
+        val savedUserId = p.getString(KEY_USER_ID, null)
+        if (savedToken.isNullOrEmpty() || savedUserId.isNullOrEmpty()) {
+            Log.w(TAG, "No credentials in prefs. Terminating service.")
+            p.edit().putBoolean(KEY_TRACKING_ACTIVE, false).apply()
+            ensureForegroundForStop()
+            shutdown(flushBeforeExit = false)
+            return START_NOT_STICKY
+        }
+        token = savedToken
+        userId = savedUserId
+        apiBase = p.getString(KEY_API_BASE, DEFAULT_API_BASE) ?: DEFAULT_API_BASE
+        punchInEpochMs = p.getLong(KEY_PUNCH_IN_EPOCH, System.currentTimeMillis())
 
-        if (token.isNullOrEmpty() || userId.isNullOrEmpty()) {
-            Log.w(TAG, "No valid credentials found in SharedPreferences or Intent. Terminating service.")
-            stopSelf()
+        if (!DeviceStatus.hasFineLocationPermission(this)) {
+            Log.w(TAG, "Location permission not granted - cannot track.")
+            markPermissionRevoked()
+            ensureForegroundForStop()
+            shutdown(flushBeforeExit = false)
             return START_NOT_STICKY
         }
 
-        val notification = buildForegroundNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        // A restarted instance may have been shut down earlier (break -> resume); reset for reuse.
+        shuttingDown = false
+        if (uploadExecutor.isShutdown) uploadExecutor = newUploadExecutor()
+
+        if (!enterForeground()) return START_NOT_STICKY
 
         acquireWakeLock()
-        registerGpsStateReceiver(token, apiBase ?: "https://perzent.vercel.app")
-        startLocationUpdates(token, userId, apiBase ?: "https://perzent.vercel.app")
+        registerGpsStateReceiver()
+        gpsProviderOff = !DeviceStatus.locationServicesEnabled(this)
+        startLocationUpdates()
+        mainHandler.removeCallbacks(notificationRefresh)
+        mainHandler.post(notificationRefresh)
+        scheduleFlush() // push anything left over from a restart
 
         return START_STICKY
     }
 
-    private fun acquireWakeLock() {
-        if (wakeLock == null) {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Perzent:DutyTrackingWakeLock").apply {
-                setReferenceCounted(false)
-                acquire(24 * 60 * 60 * 1000L)
+    // ---------------------------------------------------------------------------------------------
+    // Foreground / notification
+    // ---------------------------------------------------------------------------------------------
+
+    /** Enters the foreground; on a SecurityException (permission revoked) flags it and stops gracefully. */
+    private fun enterForeground(): Boolean {
+        val notification = buildForegroundNotification(title = "Perzent • On duty", content = shiftStatusText())
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
             }
+            isForeground = true
+            true
+        } catch (e: SecurityException) {
+            Log.e(TAG, "startForeground refused - location permission revoked", e)
+            markPermissionRevoked()
+            shutdown(flushBeforeExit = false)
+            false
+        } catch (e: Exception) {
+            // e.g. ForegroundServiceStartNotAllowedException on Android 12+ when started from the background
+            Log.e(TAG, "startForeground failed", e)
+            prefs(this).edit().putBoolean(KEY_TRACKING_ACTIVE, false).apply()
+            shutdown(flushBeforeExit = false)
+            false
         }
     }
 
-    private fun releaseWakeLock() {
+    /**
+     * A service started via startForegroundService() must call startForeground() before it
+     * stops, otherwise the system kills the process. Used on the stop path only.
+     */
+    private fun ensureForegroundForStop() {
+        if (isForeground) return
         try {
-            if (wakeLock?.isHeld == true) {
-                wakeLock?.release()
+            val notification = buildForegroundNotification(title = "Perzent", content = "Stopping location sharing…")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
             }
+            isForeground = true
         } catch (e: Exception) {
-            Log.e(TAG, "Error releasing wake lock", e)
+            Log.w(TAG, "ensureForegroundForStop: ${e.message}")
         }
-        wakeLock = null
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
-                "Work Shift & Duty Tracking",
+                "Work shift location sharing",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active shift live tracking and real-time navigation sync"
+                description = "Shown while you are checked in and your live location is shared with your employer"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 
-    private fun buildForegroundNotification(
-        title: String = "Perzent • Live Duty Active",
-        content: String = "High-accuracy live GPS tracking active • Real-time sync"
-    ): Notification {
+    private fun buildForegroundNotification(title: String, content: String): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -212,271 +376,536 @@ class PerzentLocationService : Service() {
         )
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_perzent)
             .setContentTitle(title)
             .setContentText(content)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(pendingIntent)
             .build()
     }
 
-    private fun registerGpsStateReceiver(token: String, apiBase: String) {
+    private fun shiftStatusText(): String {
+        val elapsed = if (punchInEpochMs > 0) System.currentTimeMillis() - punchInEpochMs else 0L
+        val clock = formatElapsed(elapsed)
+        return if (gpsProviderOff) {
+            "Shift $clock • GPS is off - turn it on to keep tracking"
+        } else {
+            "Shift $clock • Live location on"
+        }
+    }
+
+    /** Refreshes the single persistent notification (called every 15 s and on GPS state changes). */
+    private fun refreshNotification() {
+        if (!isForeground || shuttingDown) return
+        val title = if (gpsProviderOff) "Perzent • Location (GPS) turned off" else "Perzent • On duty"
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
+                ?.notify(NOTIFICATION_ID, buildForegroundNotification(title, shiftStatusText()))
+        } catch (e: Exception) {
+            Log.w(TAG, "Notification refresh failed: ${e.message}")
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Wake lock / receivers
+    // ---------------------------------------------------------------------------------------------
+
+    private fun acquireWakeLock() {
+        if (wakeLock != null) return
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Perzent:DutyTrackingWakeLock").apply {
+                setReferenceCounted(false)
+                acquire(24 * 60 * 60 * 1000L)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Wake lock unavailable: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing wake lock", e)
+        }
+        wakeLock = null
+    }
+
+    private fun registerGpsStateReceiver() {
         if (gpsStateReceiver != null) return
-        gpsStateReceiver = object : BroadcastReceiver() {
+        val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-                val isGpsEnabled = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
-                Log.i(TAG, "Location provider state change detected. GPS active: $isGpsEnabled")
-
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                if (!isGpsEnabled) {
-                    val warnNotif = buildForegroundNotification(
-                        title = "⚠️ Location (GPS) Turned OFF",
-                        content = "Turn on GPS immediately to maintain active live tracking"
-                    )
-                    notificationManager?.notify(NOTIFICATION_ID, warnNotif)
-                } else {
-                    val normalNotif = buildForegroundNotification(
-                        title = "Perzent • Live Duty Active",
-                        content = "High-accuracy live GPS tracking active • Real-time sync"
-                    )
-                    notificationManager?.notify(NOTIFICATION_ID, normalNotif)
-
-                    val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    val currentToken = prefs.getString(KEY_TOKEN, token) ?: token
-                    val currentUserId = prefs.getString(KEY_USER_ID, "") ?: ""
-                    startLocationUpdates(currentToken, currentUserId, apiBase)
-                }
+                if (shuttingDown) return
+                val enabled = DeviceStatus.locationServicesEnabled(this@PerzentLocationService)
+                Log.i(TAG, "Location provider state changed. Enabled: $enabled")
+                gpsProviderOff = !enabled
+                refreshNotification()
+                if (enabled) startLocationUpdates()
             }
         }
         val filter = IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
-        registerReceiver(gpsStateReceiver, filter)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(receiver, filter)
+            }
+            gpsStateReceiver = receiver
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register GPS state receiver: ${e.message}")
+        }
     }
 
-    private fun startLocationUpdates(token: String, userId: String, apiBase: String) {
-        stopLocationUpdates()
-
+    private fun unregisterGpsReceiver() {
+        val receiver = gpsStateReceiver ?: return
+        gpsStateReceiver = null
         try {
-            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            unregisterReceiver(receiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering gps receiver: ${e.message}")
+        }
+    }
 
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
+    // ---------------------------------------------------------------------------------------------
+    // Location
+    // ---------------------------------------------------------------------------------------------
+
+    private fun startLocationUpdates() {
+        stopLocationUpdates()
+        try {
+            val client = LocationServices.getFusedLocationProviderClient(this)
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
                 .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
-                .setMinUpdateDistanceMeters(1.0f) // trigger update on 1 meter movement for ultra-smooth live path
+                .setMinUpdateDistanceMeters(0f) // stationary fixes still arrive so heartbeats keep flowing
                 .setWaitForAccurateLocation(false)
                 .build()
-
-            locationCallback = object : LocationCallback() {
+            val callback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
-                    val location = result.lastLocation ?: return
-                    handleNewLocation(location, token, userId, apiBase)
+                    result.lastLocation?.let { handleNewLocation(it) }
                 }
             }
-
-            fusedLocationClient?.requestLocationUpdates(
-                locationRequest,
-                locationCallback!!,
-                Looper.getMainLooper()
-            )
-            Log.i(TAG, "FusedLocationProviderClient high-speed updates started (4s interval)")
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            fusedLocationClient = client
+            locationCallback = callback
+            Log.i(TAG, "Fused location updates started (${UPDATE_INTERVAL_MS} ms)")
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission missing for FusedLocationProviderClient", e)
+            markPermissionRevoked()
+            shutdown(flushBeforeExit = true)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start FusedLocationProviderClient, falling back to LocationManager", e)
-            startSystemLocationFallback(token, userId, apiBase)
+            // Fused provider unavailable (e.g. no Play services): fall back to the platform LocationManager.
+            Log.e(TAG, "Fused provider failed, falling back to LocationManager", e)
+            startSystemLocationFallback()
         }
-
-        // Secondary fallback to native Android LocationManager
-        startSystemLocationFallback(token, userId, apiBase)
     }
 
-    private fun startSystemLocationFallback(token: String, userId: String, apiBase: String) {
+    private fun startSystemLocationFallback() {
         if (locationManager != null && systemLocationListener != null) return
-
         try {
-            locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            systemLocationListener = object : LocationListener {
+            val manager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
-                    handleNewLocation(location, token, userId, apiBase)
+                    handleNewLocation(location)
                 }
+
                 @Deprecated("Deprecated in Java")
                 override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
                 override fun onProviderEnabled(provider: String) {}
                 override fun onProviderDisabled(provider: String) {}
             }
-
-            if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    UPDATE_INTERVAL_MS,
-                    1.0f,
-                    systemLocationListener!!,
-                    Looper.getMainLooper()
-                )
+            if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, UPDATE_INTERVAL_MS, 0f, listener, Looper.getMainLooper())
             }
-            if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    UPDATE_INTERVAL_MS,
-                    1.0f,
-                    systemLocationListener!!,
-                    Looper.getMainLooper()
-                )
+            if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, UPDATE_INTERVAL_MS, 0f, listener, Looper.getMainLooper())
             }
+            locationManager = manager
+            systemLocationListener = listener
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission missing for LocationManager", e)
-        }
-    }
-
-    private fun saveOfflineWaypoint(waypointJson: JSONObject) {
-        try {
-            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val existingStr = prefs.getString(KEY_OFFLINE_WAYPOINTS, "[]") ?: "[]"
-            val array = JSONArray(existingStr)
-            array.put(waypointJson)
-
-            val trimmed = if (array.length() > MAX_OFFLINE_POINTS) {
-                val newArr = JSONArray()
-                val start = array.length() - MAX_OFFLINE_POINTS
-                for (i in start until array.length()) {
-                    newArr.put(array.get(i))
-                }
-                newArr
-            } else {
-                array
-            }
-            prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, trimmed.toString()).apply()
-            Log.i(TAG, "Stored waypoint in offline queue. Total queued: ${trimmed.length()}")
+            markPermissionRevoked()
+            shutdown(flushBeforeExit = true)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save offline waypoint", e)
+            Log.e(TAG, "LocationManager fallback failed", e)
         }
     }
 
-    private fun flushOfflineWaypoints(token: String, apiBase: String) {
+    private fun stopLocationUpdates() {
         try {
-            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val existingStr = prefs.getString(KEY_OFFLINE_WAYPOINTS, "[]") ?: "[]"
-            val array = JSONArray(existingStr)
-            if (array.length() == 0) return
-
-            Log.i(TAG, "Flushing ${array.length()} offline queued waypoints to server")
-            val batchObj = JSONObject().apply {
-                put("waypoints", array)
-            }
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val requestBody = batchObj.toString().toRequestBody(mediaType)
-
-            val request = Request.Builder()
-                .url("$apiBase/api/mobile/waypoints")
-                .post(requestBody)
-                .addHeader("Authorization", "Bearer $token")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                prefs.edit().putString(KEY_OFFLINE_WAYPOINTS, "[]").apply()
-                Log.i(TAG, "Successfully flushed ${array.length()} offline queued waypoints!")
-            }
-            response.close()
+            locationCallback?.let { callback -> fusedLocationClient?.removeLocationUpdates(callback) }
+            systemLocationListener?.let { listener -> locationManager?.removeUpdates(listener) }
         } catch (e: Exception) {
-            Log.w(TAG, "Offline flush attempt deferred (network unavailable): ${e.message}")
+            Log.e(TAG, "Error stopping location updates", e)
         }
+        locationCallback = null
+        fusedLocationClient = null
+        systemLocationListener = null
+        locationManager = null
     }
 
-    private fun handleNewLocation(location: Location, token: String, userId: String, apiBase: String) {
-        val nowIso = formatIso8601(Date(location.time.takeIf { it > 0 } ?: System.currentTimeMillis()))
+    /** Main thread. Coalesces fixes into uploads: every 5 s while moving, every 30 s while stationary. */
+    private fun handleNewLocation(location: Location) {
+        if (shuttingDown) return
+        if (stopRequested) {
+            shutdown(flushBeforeExit = true)
+            return
+        }
+
         val isMock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             location.isMock
         } else {
             @Suppress("DEPRECATION")
             location.isFromMockProvider
         }
+        lastMockFlag = isMock
+        lastFixEpochMs = System.currentTimeMillis() // heartbeat: recorded for every fix
 
-        Log.d(TAG, "Live GPS ping: lat=${location.latitude}, lng=${location.longitude}, speed=${location.speed}, heading=${location.bearing}")
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val previous = lastAcceptedLocation
+        val moved = previous == null || previous.distanceTo(location) > STATIONARY_DISTANCE_METERS
+        val minInterval = if (moved) MOVING_UPLOAD_INTERVAL_MS else STATIONARY_UPLOAD_INTERVAL_MS
+        val uploadDue = lastUploadElapsedMs == 0L || nowElapsed - lastUploadElapsedMs >= minInterval
 
-        Thread {
-            val waypointJson = JSONObject().apply {
+        if (uploadDue) {
+            lastUploadElapsedMs = nowElapsed
+            lastAcceptedLocation = location
+            val recordedAt = formatIso8601(Date(location.time.takeIf { it > 0 } ?: System.currentTimeMillis()))
+            val waypoint = JSONObject().apply {
                 put("latitude", location.latitude)
                 put("longitude", location.longitude)
                 put("accuracy", location.accuracy.toDouble())
                 put("speed", location.speed.toDouble())
                 put("heading", location.bearing.toDouble())
-                put("recorded_at", nowIso)
+                put("recorded_at", recordedAt)
             }
-
-            try {
-                // First attempt to flush any pending offline waypoints
-                flushOfflineWaypoints(token, apiBase)
-
-                val mediaType = "application/json; charset=utf-8".toMediaType()
-                val requestBody = waypointJson.toString().toRequestBody(mediaType)
-
-                val request = Request.Builder()
-                    .url("$apiBase/api/mobile/waypoints")
-                    .post(requestBody)
-                    .addHeader("Authorization", "Bearer $token")
-                    .addHeader("Content-Type", "application/json")
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Live waypoint posted (200 OK)")
-                } else {
-                    saveOfflineWaypoint(waypointJson)
-                }
-                response.close()
-            } catch (e: Exception) {
-                Log.w(TAG, "Signal dropped / network failed: ${e.message}. Queuing locally.")
-                saveOfflineWaypoint(waypointJson)
+            Log.d(TAG, "Queue waypoint lat=${location.latitude} lng=${location.longitude} moved=$moved")
+            submit {
+                enqueueWaypoint(waypoint)
+                flushQueue(token, apiBase)
             }
+        }
 
-            val nowMs = System.currentTimeMillis()
-            if (nowMs - lastTelemetrySendTime > 45_000L) {
-                lastTelemetrySendTime = nowMs
-                try {
-                    sendTelemetry(token, apiBase, isMock)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Telemetry error: ${e.message}")
-                }
-            }
-        }.start()
+        if (nowElapsed - lastTelemetryElapsedMs >= TELEMETRY_INTERVAL_MS) {
+            lastTelemetryElapsedMs = nowElapsed
+            val currentToken = token
+            val currentBase = apiBase
+            submit { sendTelemetry(currentToken, currentBase, isMock) }
+        }
     }
 
-    private fun sendTelemetry(token: String, apiBase: String, isMock: Boolean) {
-        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val isGpsEnabled = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+    // ---------------------------------------------------------------------------------------------
+    // Offline queue (single upload worker + lock)
+    // ---------------------------------------------------------------------------------------------
 
-        val telemetryObj = JSONObject().apply {
-            put("battery_level", batteryLevel)
-            put("battery_power_save", powerManager.isPowerSaveMode)
+    private fun submit(task: () -> Unit) {
+        if (shuttingDown && !stopRequested) return
+        try {
+            uploadExecutor.execute {
+                try {
+                    task()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Upload task failed: ${e.message}")
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            Log.w(TAG, "Upload worker is shut down; task dropped")
+        }
+    }
+
+    private fun readQueue(): JSONArray = synchronized(queueLock) {
+        try {
+            JSONArray(prefs(this).getString(KEY_OFFLINE_WAYPOINTS, "[]") ?: "[]")
+        } catch (e: Exception) {
+            JSONArray()
+        }
+    }
+
+    private fun writeQueue(array: JSONArray) = synchronized(queueLock) {
+        prefs(this).edit().putString(KEY_OFFLINE_WAYPOINTS, array.toString()).commit()
+    }
+
+    private fun enqueueWaypoint(waypoint: JSONObject) {
+        synchronized(queueLock) {
+            val array = readQueue()
+            array.put(waypoint)
+            val trimmed = if (array.length() > MAX_OFFLINE_POINTS) {
+                JSONArray().also { next ->
+                    for (i in (array.length() - MAX_OFFLINE_POINTS) until array.length()) next.put(array.get(i))
+                }
+            } else {
+                array
+            }
+            writeQueue(trimmed)
+        }
+    }
+
+    private fun removeFromQueueHead(count: Int) {
+        synchronized(queueLock) {
+            val array = readQueue()
+            val remaining = JSONArray()
+            for (i in count until array.length()) remaining.put(array.get(i))
+            writeQueue(remaining)
+        }
+    }
+
+    private fun clearQueue() = writeQueue(JSONArray())
+
+    private fun scheduleFlush() {
+        val currentToken = token
+        val currentBase = apiBase
+        if (currentToken.isEmpty()) return
+        submit { flushQueue(currentToken, currentBase) }
+    }
+
+    private fun scheduleBackoff() {
+        currentBackoffMs = (currentBackoffMs * 2).coerceIn(BACKOFF_MIN_MS, BACKOFF_MAX_MS)
+        retryNotBeforeMs = System.currentTimeMillis() + currentBackoffMs
+        Log.w(TAG, "Upload failed; retrying in ${currentBackoffMs / 1000}s")
+        mainHandler.post {
+            if (shuttingDown) return@post
+            mainHandler.removeCallbacks(retryRunnable)
+            mainHandler.postDelayed(retryRunnable, currentBackoffMs)
+        }
+    }
+
+    private fun resetBackoff() {
+        currentBackoffMs = 0L
+        retryNotBeforeMs = 0L
+    }
+
+    /**
+     * Upload thread. Drains the queue in batches of up to [MAX_BATCH_SIZE] until empty or failure.
+     * 2xx -> remove batch; 400 -> drop batch; 401 -> auth invalid; 409 -> shift ended remotely;
+     * 5xx / IOException -> keep and retry with exponential backoff (5 s .. 2 min).
+     */
+    private fun flushQueue(token: String, apiBase: String, ignoreBackoff: Boolean = false) {
+        if (token.isEmpty()) return
+        if (!ignoreBackoff && System.currentTimeMillis() < retryNotBeforeMs) return
+
+        while (true) {
+            val queue = readQueue()
+            if (queue.length() == 0) return
+            val batch = JSONArray()
+            for (i in 0 until minOf(queue.length(), MAX_BATCH_SIZE)) batch.put(queue.get(i))
+
+            val body = JSONObject().put("waypoints", batch).toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url("$apiBase/api/mobile/waypoints")
+                .post(body)
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> {
+                            removeFromQueueHead(batch.length())
+                            resetBackoff()
+                            Log.d(TAG, "Uploaded ${batch.length()} waypoint(s)")
+                        }
+                        response.code == 401 -> {
+                            onAuthInvalid()
+                            return
+                        }
+                        response.code == 409 -> {
+                            onShiftEndedRemotely()
+                            return
+                        }
+                        response.code in 400..499 -> {
+                            Log.w(TAG, "Batch rejected (HTTP ${response.code}); dropping ${batch.length()} point(s)")
+                            removeFromQueueHead(batch.length())
+                        }
+                        else -> {
+                            scheduleBackoff()
+                            return
+                        }
+                    }
+                }
+            } catch (e: IOException) {
+                Log.w(TAG, "Network unavailable (${e.message}); ${queue.length()} point(s) kept offline")
+                scheduleBackoff()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Upload error: ${e.message}")
+                scheduleBackoff()
+                return
+            }
+        }
+    }
+
+    private fun onAuthInvalid() {
+        Log.w(TAG, "Server returned 401 - session invalid. Stopping tracking and wiping credentials.")
+        synchronized(queueLock) {
+            prefs(this).edit()
+                .putBoolean(KEY_AUTH_INVALID, true)
+                .putBoolean(KEY_TRACKING_ACTIVE, false)
+                .remove(KEY_TOKEN)
+                .remove(KEY_USER_ID)
+                .remove(KEY_PUNCH_IN_EPOCH)
+                .putString(KEY_OFFLINE_WAYPOINTS, "[]")
+                .commit()
+        }
+        token = ""
+        mainHandler.post { shutdown(flushBeforeExit = false) }
+    }
+
+    private fun onShiftEndedRemotely() {
+        Log.w(TAG, "Server returned 409 NO_ACTIVE_SHIFT - shift ended elsewhere. Stopping tracking.")
+        synchronized(queueLock) {
+            prefs(this).edit()
+                .putBoolean(KEY_SHIFT_ENDED_REMOTELY, true)
+                .putBoolean(KEY_TRACKING_ACTIVE, false)
+                .putString(KEY_OFFLINE_WAYPOINTS, "[]")
+                .commit()
+        }
+        mainHandler.post { shutdown(flushBeforeExit = false) }
+    }
+
+    private fun markPermissionRevoked() {
+        prefs(this).edit()
+            .putBoolean(KEY_PERMISSION_REVOKED, true)
+            .putBoolean(KEY_TRACKING_ACTIVE, false)
+            .apply()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Telemetry
+    // ---------------------------------------------------------------------------------------------
+
+    /** Upload thread. PATCH /api/mobile/attendance with the same telemetry shape as the JS side. */
+    private fun sendTelemetry(token: String, apiBase: String, isMock: Boolean) {
+        if (token.isEmpty()) return
+        val context = this
+        val telemetry = JSONObject().apply {
+            put("battery_level", DeviceStatus.batteryLevel(context))
+            put("battery_status", DeviceStatus.batteryStatus(context))
+            put("battery_power_save", DeviceStatus.isPowerSaveMode(context))
+            put("developer_options_enabled", DeviceStatus.developerOptionsEnabled(context))
+            put("location_services_enabled", DeviceStatus.locationServicesEnabled(context))
+            put("location_permission_granted", DeviceStatus.hasFineLocationPermission(context))
+            put("background_location_permission_granted", DeviceStatus.hasBackgroundLocationPermission(context))
             put("mock_location_detected", isMock)
-            put("location_services_enabled", isGpsEnabled)
-            put("location_permission_granted", true)
             put("updated_at", formatIso8601(Date()))
         }
-
-        val rootObj = JSONObject().apply {
-            put("telemetry", telemetryObj)
+        val device = JSONObject().apply {
+            put("device_model", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+            put("os_version", "Android ${Build.VERSION.RELEASE}")
         }
-
-        val mediaType = "application/json; charset=utf-8".toMediaType()
-        val requestBody = rootObj.toString().toRequestBody(mediaType)
+        val body = JSONObject().apply {
+            put("telemetry", telemetry)
+            put("device", device)
+        }.toString().toRequestBody(jsonMediaType)
 
         val request = Request.Builder()
             .url("$apiBase/api/mobile/attendance")
-            .patch(requestBody)
+            .patch(body)
             .addHeader("Authorization", "Bearer $token")
             .addHeader("Content-Type", "application/json")
             .build()
 
-        val response = httpClient.newCall(request).execute()
-        response.close()
+        try {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.code == 401) onAuthInvalid()
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "Telemetry deferred: ${e.message}")
+        }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Main thread. Tears everything down and stops the service. When [flushBeforeExit] is set a
+     * final upload of the offline queue is attempted on the worker before it shuts down.
+     */
+    internal fun shutdown(flushBeforeExit: Boolean) {
+        if (shuttingDown) return
+        shuttingDown = true
+        mainHandler.removeCallbacksAndMessages(null)
+        stopLocationUpdates()
+        unregisterGpsReceiver()
+        releaseWakeLock()
+
+        val finalToken = token
+        val finalBase = apiBase
+        if (flushBeforeExit && finalToken.isNotEmpty() && !uploadExecutor.isShutdown) {
+            try {
+                uploadExecutor.execute { flushQueue(finalToken, finalBase, ignoreBackoff = true) }
+            } catch (e: RejectedExecutionException) {
+                // worker already gone
+            }
+        }
+        uploadExecutor.shutdown() // queued work (the final flush) completes; nothing new is accepted
+
+        try {
+            if (isForeground) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                isForeground = false
+            } else {
+                (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(NOTIFICATION_ID)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "stopForeground failed: ${e.message}")
+        }
+        stopSelf()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (!prefs(this).getBoolean(KEY_TRACKING_ACTIVE, false) || stopRequested) return
+        Log.w(TAG, "App task removed while on duty - scheduling service restart.")
+        val restartIntent = Intent(applicationContext, PerzentLocationService::class.java).apply { action = ACTION_START }
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                applicationContext, 101, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                applicationContext, 101, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        try {
+            (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1000,
+                pendingIntent
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not schedule restart alarm: ${e.message}")
+        }
+    }
+
+    override fun onDestroy() {
+        Log.i(TAG, "PerzentLocationService onDestroy")
+        if (instance === this) instance = null
+        mainHandler.removeCallbacksAndMessages(null)
+        stopLocationUpdates()
+        unregisterGpsReceiver()
+        releaseWakeLock()
+
+        val p = prefs(this)
+        if (stopRequested || !p.getBoolean(KEY_TRACKING_ACTIVE, false)) {
+            // Destroyed after a stop (not a system kill mid-shift): credentials must not outlive the shift.
+            p.edit().remove(KEY_TOKEN).remove(KEY_USER_ID).remove(KEY_PUNCH_IN_EPOCH).apply()
+        }
+        if (!uploadExecutor.isShutdown) uploadExecutor.shutdown()
+        super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------------------------
 
     private fun formatIso8601(date: Date): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
@@ -484,63 +913,11 @@ class PerzentLocationService : Service() {
         return sdf.format(date)
     }
 
-    private fun stopLocationUpdates() {
-        try {
-            if (locationCallback != null && fusedLocationClient != null) {
-                fusedLocationClient?.removeLocationUpdates(locationCallback!!)
-                locationCallback = null
-            }
-            if (systemLocationListener != null && locationManager != null) {
-                locationManager?.removeUpdates(systemLocationListener!!)
-                systemLocationListener = null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping location updates", e)
-        }
-    }
-
-    private fun stopTracking() {
-        stopLocationUpdates()
-        try {
-            if (gpsStateReceiver != null) {
-                unregisterReceiver(gpsStateReceiver)
-                gpsStateReceiver = null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering gps receiver", e)
-        }
-        releaseWakeLock()
-    }
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        Log.w(TAG, "App task removed from recent menu! Re-scheduling service survival.")
-
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val isActive = prefs.getBoolean(KEY_TRACKING_ACTIVE, false)
-
-        if (isActive) {
-            val restartIntent = Intent(applicationContext, PerzentLocationService::class.java).apply {
-                action = ACTION_START
-            }
-            val pendingIntent = PendingIntent.getService(
-                applicationContext,
-                101,
-                restartIntent,
-                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-            alarmManager?.set(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + 1000,
-                pendingIntent
-            )
-        }
-    }
-
-    override fun onDestroy() {
-        Log.i(TAG, "PerzentLocationService onDestroy")
-        stopTracking()
-        super.onDestroy()
+    private fun formatElapsed(ms: Long): String {
+        val totalSeconds = (ms / 1000).coerceAtLeast(0)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
     }
 }

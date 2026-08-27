@@ -1,42 +1,38 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
+import { currentDwellMinutes } from '@perzent/location-engine';
+import { SYSTEM_CONFIG, type LiveTeamMember } from '@perzent/shared-types';
 import { authErrorResponse, requireSession } from '@/lib/auth';
+import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { workDateFor } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
-const getTodayIst = () => {
-  const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-  return new Date(`${istDateStr}T00:00:00.000Z`);
-};
+const RECENT_POINTS = 25;
 
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
-    const today = getTodayIst();
+    const policy = await getCompanyPolicy(session.companyId);
+    await enforceCompanyPolicies(policy.id, { policy });
+    const today = workDateFor(policy.timezone);
 
     const users = await prisma.user.findMany({
       where: {
         company_id: session.companyId,
-        role: session.role === 'OWNER' ? { in: ['EMPLOYEE', 'MANAGER'] } : 'EMPLOYEE',
+        role: { in: ['EMPLOYEE', 'MANAGER'] },
         status: 'ACTIVE',
         ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
       },
       include: {
         department: { select: { name: true } },
-        devices: { where: { is_active: true }, take: 1 },
+        devices: { where: { is_active: true }, orderBy: { last_seen_at: 'desc' }, take: 1 },
         attendances: {
-          where: {
-            OR: [
-              { work_date: today },
-              { status: { in: ['CHECKED_IN', 'ON_BREAK'] } },
-            ],
-          },
+          where: { OR: [{ work_date: today }, { status: { in: ['CHECKED_IN', 'ON_BREAK'] } }] },
           orderBy: { punch_in_time: 'desc' },
           take: 1,
           include: {
-            breaks: { where: { end_time: null }, take: 1 },
-            waypoints: { orderBy: { recorded_at: 'desc' }, take: 1 },
-            stops: { orderBy: { end_time: 'desc' }, take: 1 },
+            waypoints: { orderBy: { recorded_at: 'desc' }, take: RECENT_POINTS },
             tamper_logs: { orderBy: { occurred_at: 'desc' }, take: 1 },
           },
         },
@@ -45,47 +41,57 @@ export async function GET(request: Request) {
     });
 
     const nowEpoch = Date.now();
-
-    return NextResponse.json(users.map((user: any) => {
-      const attendance = user.attendances?.[0];
-      const waypoint = attendance?.waypoints?.[0];
-      const stop = attendance?.stops?.[0];
+    const members: LiveTeamMember[] = users.map((user) => {
+      const attendance = user.attendances[0];
+      const recent = attendance?.waypoints ?? [];
+      const waypoint = recent[0];
       const tamper = attendance?.tamper_logs[0];
       const device = user.devices[0];
-      const telemetry = device?.telemetry && typeof device.telemetry === 'object' ? device.telemetry as any : undefined;
-      const shiftStatus = !attendance
+      const telemetry = device?.telemetry && typeof device.telemetry === 'object' ? (device.telemetry as any) : undefined;
+
+      const shiftStatus: LiveTeamMember['shift_status'] = !attendance
         ? 'OFF_DUTY'
-        : attendance.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : attendance.status;
+        : attendance.status === 'AUTO_CHECKED_OUT'
+          ? 'CHECKED_OUT'
+          : attendance.status;
+
+      const pingDate = waypoint?.recorded_at || attendance?.punch_in_time || null;
+      const secondsSinceLastPing = pingDate ? Math.max(0, Math.floor((nowEpoch - pingDate.getTime()) / 1000)) : null;
+      const isGpsDisconnected =
+        shiftStatus === 'CHECKED_IN' && secondsSinceLastPing !== null && secondsSinceLastPing > SYSTEM_CONFIG.LIVE_STALE_SECONDS;
 
       const hasPunchLocation = Number.isFinite(attendance?.punch_in_lat) && Number.isFinite(attendance?.punch_in_lng);
-      const pingDate = waypoint?.recorded_at || attendance?.punch_in_time || null;
-      const pingEpoch = pingDate ? new Date(pingDate).getTime() : 0;
-      const secondsSinceLastPing = pingEpoch > 0 ? Math.max(0, Math.floor((nowEpoch - pingEpoch) / 1000)) : null;
+      const currentLocation: LiveTeamMember['current_location'] = waypoint
+        ? {
+            latitude: waypoint.latitude,
+            longitude: waypoint.longitude,
+            accuracy: waypoint.accuracy,
+            speed: waypoint.speed,
+            heading: waypoint.heading,
+            address_name: `${waypoint.latitude.toFixed(4)}, ${waypoint.longitude.toFixed(4)}`,
+            last_ping_at: waypoint.recorded_at.toISOString(),
+          }
+        : hasPunchLocation && attendance
+          ? {
+              latitude: attendance.punch_in_lat as number,
+              longitude: attendance.punch_in_lng as number,
+              accuracy: 25,
+              speed: 0,
+              heading: 0,
+              address_name: 'Check-in location',
+              last_ping_at: attendance.punch_in_time.toISOString(),
+            }
+          : undefined;
 
-      // 2-minute rule (120 seconds): if checked in but no waypoint in >120s, mark GPS/Location disconnected
-      const isGpsDisconnected = Boolean(
-        shiftStatus === 'CHECKED_IN' &&
-        secondsSinceLastPing !== null &&
-        secondsSinceLastPing > 120
-      );
-
-      const currentLocation = waypoint ? {
-        latitude: waypoint.latitude,
-        longitude: waypoint.longitude,
-        accuracy: waypoint.accuracy,
-        speed: waypoint.speed,
-        heading: waypoint.heading,
-        address_name: stop?.address_name || `${waypoint.latitude.toFixed(4)}°N, ${waypoint.longitude.toFixed(4)}°E`,
-        last_ping_at: waypoint.recorded_at.toISOString(),
-      } : (hasPunchLocation ? {
-        latitude: attendance.punch_in_lat,
-        longitude: attendance.punch_in_lng,
-        accuracy: 10,
-        speed: 0,
-        heading: 0,
-        address_name: 'Checked In Spot',
-        last_ping_at: attendance.punch_in_time ? new Date(attendance.punch_in_time).toISOString() : new Date().toISOString(),
-      } : undefined);
+      const mockDetected = telemetry?.mock_location_detected === true;
+      const locationServicesOff = telemetry?.location_services_enabled === false;
+      const tamperReason = isGpsDisconnected
+        ? `No GPS ping for over ${Math.round(SYSTEM_CONFIG.LIVE_STALE_SECONDS / 60)} minutes (location or internet off)`
+        : mockDetected
+          ? 'Mock/fake location app detected'
+          : locationServicesOff && shiftStatus === 'CHECKED_IN'
+            ? 'Location services turned off'
+            : tamper?.details || null;
 
       return {
         user_id: user.id,
@@ -93,22 +99,24 @@ export async function GET(request: Request) {
         designation: user.designation,
         department_name: user.department?.name || 'Unassigned',
         shift_status: shiftStatus,
-        punch_in_time: attendance?.punch_in_time ? new Date(attendance.punch_in_time).toISOString() : null,
-        punch_out_time: attendance?.punch_out_time ? new Date(attendance.punch_out_time).toISOString() : null,
+        punch_in_time: attendance?.punch_in_time.toISOString() || null,
+        punch_out_time: attendance?.punch_out_time?.toISOString() || null,
         current_location: currentLocation,
-        is_moving: Boolean(waypoint && waypoint.speed > 3),
-        dwell_minutes: stop ? Math.round(stop.dwell_duration_seconds / 60) : 0,
-        battery_level: telemetry?.battery_level,
+        is_moving: Boolean(waypoint && waypoint.speed > SYSTEM_CONFIG.STATIONARY_SPEED_THRESHOLD_MS),
+        dwell_minutes: recent.length > 1 ? currentDwellMinutes([...recent].reverse()) : 0,
+        battery_level: typeof telemetry?.battery_level === 'number' ? telemetry.battery_level : undefined,
         telemetry,
-        device_model: device?.device_model || 'No device bound',
+        device_model: device?.device_model || undefined,
         device_uuid: device?.device_uuid,
-        gps_enabled: !isGpsDisconnected && tamper?.event_type !== 'GPS_DISABLED',
+        gps_enabled: !isGpsDisconnected && !locationServicesOff,
         is_gps_disconnected: isGpsDisconnected,
         seconds_since_last_ping: secondsSinceLastPing,
-        has_tamper_alert: Boolean(tamper) || isGpsDisconnected,
-        tamper_reason: isGpsDisconnected ? 'No GPS ping for > 2 minutes (Location or Internet off)' : tamper?.details || null,
+        has_tamper_alert: Boolean(tamperReason),
+        tamper_reason: tamperReason,
       };
-    }));
+    });
+
+    return NextResponse.json(members);
   } catch (error) {
     return authErrorResponse(error);
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Alert,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -14,14 +15,26 @@ import LoginScreen from './src/screens/LoginScreen';
 import DutyDashboardScreen from './src/screens/DutyDashboardScreen';
 import { DeviceBindingService } from './src/services/DeviceBindingService';
 import { EmployeeApi } from './src/services/EmployeeApi';
-import { AutoUpdateService, AppVersionInfo } from './src/services/AutoUpdateService';
+import { AutoUpdateService, UpdateDecision } from './src/services/AutoUpdateService';
 import { BackgroundTrackingService } from './src/services/BackgroundTrackingService';
+import { SessionEvents } from './src/services/SessionEvents';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
-  const [updateInfo, setUpdateInfo] = useState<AppVersionInfo | null>(null);
+  const [updateDecision, setUpdateDecision] = useState<UpdateDecision | null>(null);
+
+  // Any 401 from the API layers (attendance, waypoint queue, native service flags) ends the session.
+  useEffect(() => {
+    SessionEvents.setUnauthorizedHandler(() => {
+      BackgroundTrackingService.stop().catch(() => undefined);
+      DeviceBindingService.clearSession().catch(() => undefined);
+      setSession(null);
+      Alert.alert('Signed out', 'Your session has expired or was reset by your manager. Please sign in again.');
+    });
+    return () => SessionEvents.setUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -31,22 +44,22 @@ export default function App() {
       if (saved) setSession(saved);
       setLoading(false);
 
-      // Automatically sense and check for updates
-      AutoUpdateService.checkForUpdates((detected) => {
-        setUpdateInfo(detected);
-      });
+      const decision = await AutoUpdateService.checkForUpdates();
+      if (decision) setUpdateDecision(decision);
     })();
 
-    // Auto-check on app resume and every 15 minutes
+    const checkUpdate = async () => {
+      const decision = await AutoUpdateService.checkForUpdates();
+      if (decision) setUpdateDecision(decision);
+    };
+
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        AutoUpdateService.checkForUpdates((detected) => setUpdateInfo(detected));
+        checkUpdate();
       }
     });
 
-    const updateInterval = setInterval(() => {
-      AutoUpdateService.checkForUpdates((detected) => setUpdateInfo(detected));
-    }, 15 * 60 * 1000);
+    const updateInterval = setInterval(checkUpdate, 15 * 60 * 1000);
 
     return () => {
       sub.remove();
@@ -82,23 +95,36 @@ export default function App() {
       )}
 
       {/* Auto-Sensed Update Modal */}
-      {updateInfo && (
+      {updateDecision && (
         <Modal transparent animationType="fade" visible={true}>
           <View style={styles.modalBackdrop}>
             <View style={styles.modalCard}>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>Auto Update Available</Text>
+                <Text style={styles.badgeText}>
+                  {updateDecision.forced ? 'Required Update' : 'Auto Update Available'}
+                </Text>
               </View>
-              <Text style={styles.modalTitle}>Update to v{updateInfo.latest_version}</Text>
+              <Text style={styles.modalTitle}>Update to v{updateDecision.info.latest_version}</Text>
               <Text style={styles.modalBody}>
-                {updateInfo.release_notes || 'A new required version of Perzent Workforce is available with critical location and security upgrades.'}
+                {AutoUpdateService.describe(updateDecision)}
               </Text>
               <TouchableOpacity
                 style={styles.updateButton}
-                onPress={() => AutoUpdateService.triggerInstall(updateInfo.download_url)}
+                onPress={() => AutoUpdateService.openUpdate(updateDecision.info)}
               >
                 <Text style={styles.updateButtonText}>Install Update Now</Text>
               </TouchableOpacity>
+              {!updateDecision.forced && (
+                <TouchableOpacity
+                  style={{ marginTop: 12 }}
+                  onPress={async () => {
+                    await AutoUpdateService.dismiss(updateDecision.info);
+                    setUpdateDecision(null);
+                  }}
+                >
+                  <Text style={{ color: '#64748B', fontSize: 13, fontWeight: '600' }}>Remind Me Later</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </Modal>

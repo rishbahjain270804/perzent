@@ -1,101 +1,97 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
-import { authErrorResponse, requireSession } from '@/lib/auth';
+import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
+import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { addDays, localMinutesOfDay, workDateFor } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
+
+const ALLOWED_WINDOWS = [7, 30, 90];
+const LATE_THRESHOLD_MINUTES = 9 * 60 + 30; // 09:30 company time
 
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
-    const { searchParams } = new URL(request.url);
-    const days = parseInt(searchParams.get('days') || '30', 10);
+    const policy = await getCompanyPolicy(session.companyId);
+    await enforceCompanyPolicies(policy.id, { policy });
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    cutoffDate.setHours(0, 0, 0, 0);
+    const daysParam = parseInt(new URL(request.url).searchParams.get('days') || '30', 10);
+    if (!ALLOWED_WINDOWS.includes(daysParam)) return jsonError('days must be 7, 30 or 90', 400, 'VALIDATION');
+    const cutoff = workDateFor(policy.timezone, addDays(new Date(), -daysParam));
+    const scope = session.role === 'MANAGER' ? { manager_id: session.userId } : {};
 
-    const [users, attendanceRecords, leaveRecords] = await Promise.all([
+    const [users, records, leaves] = await Promise.all([
       prisma.user.findMany({
-        where: {
-          company_id: session.companyId,
-          role: { not: 'OWNER' },
-          status: 'ACTIVE',
-          ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
-        },
-        select: { id: true, full_name: true, department: { select: { name: true } } },
+        where: { company_id: session.companyId, role: { not: 'OWNER' }, status: 'ACTIVE', ...scope },
+        select: { id: true },
       }),
       prisma.attendanceRecord.findMany({
-        where: {
-          user: {
-            company_id: session.companyId,
-            ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
-          },
-          work_date: { gte: cutoffDate },
-        },
-        include: {
-          user: { select: { id: true, full_name: true, department: { select: { name: true } } } },
-        },
-        orderBy: { work_date: 'asc' },
+        where: { user: { company_id: session.companyId, ...scope }, work_date: { gte: cutoff } },
+        include: { user: { select: { department: { select: { name: true } } } } },
       }),
-      prisma.leaveRequest.findMany({
+      prisma.leaveRequest.count({
         where: {
           company_id: session.companyId,
           status: 'APPROVED',
-          start_date: { gte: cutoffDate },
+          start_date: { gte: cutoff },
           ...(session.role === 'MANAGER' ? { user: { manager_id: session.userId } } : {}),
         },
       }),
     ]);
 
-    let onTimeCount = 0;
-    let lateClockInCount = 0;
-    let totalGrossMinutes = 0;
-    let totalNetMinutes = 0;
-    let totalBreakMinutes = 0;
+    let onTime = 0;
+    let late = 0;
+    let completed = 0;
+    let netMinutes = 0;
+    let breakMinutes = 0;
+    let grossMinutes = 0;
+    const departments: Record<string, { name: string; total_minutes: number; punches: number; late_punches: number }> = {};
 
-    const departmentStats: Record<string, { name: string; total_hours: number; punches: number; late_punches: number }> = {};
+    for (const record of records) {
+      const isClosed = record.status === 'CHECKED_OUT' || record.status === 'AUTO_CHECKED_OUT';
+      const isLate = record.punch_in_by === 'EMPLOYEE' || record.punch_in_by === 'KIOSK'
+        ? localMinutesOfDay(policy.timezone, record.punch_in_time) > LATE_THRESHOLD_MINUTES
+        : false;
+      if (isLate) late += 1;
+      else onTime += 1;
 
-    for (const record of attendanceRecords) {
-      totalGrossMinutes += record.gross_worked_minutes;
-      totalNetMinutes += record.net_worked_minutes;
-      totalBreakMinutes += record.total_break_minutes;
+      const dept = record.user.department?.name || 'Unassigned';
+      departments[dept] ||= { name: dept, total_minutes: 0, punches: 0, late_punches: 0 };
+      departments[dept].punches += 1;
+      if (isLate) departments[dept].late_punches += 1;
 
-      // Late clock-in check (IST 9:30 AM threshold: 04:00 UTC)
-      const punchDate = new Date(record.punch_in_time);
-      const istHours = (punchDate.getUTCHours() + 5 + Math.floor((punchDate.getUTCMinutes() + 30) / 60)) % 24;
-      const istMinutes = (punchDate.getUTCMinutes() + 30) % 60;
-      const isLate = (istHours > 9 || (istHours === 9 && istMinutes > 30));
-
-      if (isLate) {
-        lateClockInCount++;
-      } else {
-        onTimeCount++;
+      if (isClosed) {
+        completed += 1;
+        netMinutes += record.net_worked_minutes;
+        breakMinutes += record.total_break_minutes;
+        grossMinutes += record.gross_worked_minutes;
+        departments[dept].total_minutes += record.net_worked_minutes;
       }
-
-      const deptName = record.user.department?.name || 'Unassigned';
-      if (!departmentStats[deptName]) {
-        departmentStats[deptName] = { name: deptName, total_hours: 0, punches: 0, late_punches: 0 };
-      }
-      departmentStats[deptName].total_hours += Number((record.net_worked_minutes / 60).toFixed(2));
-      departmentStats[deptName].punches += 1;
-      if (isLate) departmentStats[deptName].late_punches += 1;
     }
 
-    const totalPunches = attendanceRecords.length;
-    const punctualityRate = totalPunches > 0 ? Math.round((onTimeCount / totalPunches) * 100) : 100;
-
+    const punches = records.length;
     return NextResponse.json({
-      period_days: days,
+      period_days: daysParam,
+      timezone: policy.timezone,
+      late_after: '09:30',
       total_employees: users.length,
-      total_shifts_completed: totalPunches,
-      punctuality_rate_percentage: punctualityRate,
-      on_time_shifts: onTimeCount,
-      late_shifts: lateClockInCount,
-      total_approved_leaves: leaveRecords.length,
-      total_hours_worked: Number((totalNetMinutes / 60).toFixed(1)),
-      total_break_hours: Number((totalBreakMinutes / 60).toFixed(1)),
-      average_shift_hours: totalPunches > 0 ? Number((totalNetMinutes / (totalPunches * 60)).toFixed(1)) : 0,
-      department_breakdown: Object.values(departmentStats),
+      total_shifts: punches,
+      total_shifts_completed: completed,
+      open_shifts: punches - completed,
+      punctuality_rate_percentage: punches > 0 ? Math.round((onTime / punches) * 100) : 100,
+      on_time_shifts: onTime,
+      late_shifts: late,
+      total_approved_leaves: leaves,
+      total_hours_worked: Number((netMinutes / 60).toFixed(1)),
+      total_gross_hours: Number((grossMinutes / 60).toFixed(1)),
+      total_break_hours: Number((breakMinutes / 60).toFixed(1)),
+      average_shift_hours: completed > 0 ? Number((netMinutes / (completed * 60)).toFixed(1)) : 0,
+      department_breakdown: Object.values(departments).map((dept) => ({
+        name: dept.name,
+        total_hours: Number((dept.total_minutes / 60).toFixed(1)),
+        punches: dept.punches,
+        late_punches: dept.late_punches,
+      })),
     });
   } catch (error) {
     return authErrorResponse(error);

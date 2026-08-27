@@ -1,24 +1,26 @@
 export const SYSTEM_CONFIG = {
-  // Timezone & Cutoffs
   DEFAULT_TIMEZONE: 'Asia/Kolkata',
-  AUTO_CHECKOUT_TIME_IST: '23:40',
-  MAX_LUNCH_BREAK_MINUTES: 30,
+  DEFAULT_AUTO_CHECKOUT_TIME: '23:40',
+  DEFAULT_MAX_BREAK_MINUTES: 30,
+  DEFAULT_ROUTE_RETENTION_DAYS: 15,
+  DEFAULT_ATTENDANCE_RETENTION_DAYS: 45,
 
-  // Retention Policies (Free Tier)
-  ROUTE_HISTORY_RETENTION_DAYS: 15,
-  ATTENDANCE_RETENTION_DAYS: 45,
+  // Ingestion quality gates
+  MAX_ACCEPTED_ACCURACY_METERS: 150, // waypoints noisier than this are dropped
+  MAX_WAYPOINT_AGE_DAYS: 7, // reject timestamps older than this
+  MAX_WAYPOINT_FUTURE_SKEW_MS: 5 * 60 * 1000,
+  MAX_WAYPOINTS_PER_BATCH: 500,
 
-  // Precision Tracking Engine Parameters
-  TRACKING_INTERVAL_MS: 120000,          // 2 minutes (default)
-  WALKING_INTERVAL_MS: 60000,            // 1 minute when walking
-  VEHICLE_INTERVAL_MS: 30000,            // 30 seconds in vehicle
-  HEADING_CHANGE_TRIGGER_DEG: 30,        // Corner turn detection
-  MAX_ALLOWED_ACCURACY_METERS: 30,       // Discard noisy fixes > 30m
-  STATIONARY_RADIUS_METERS: 20,          // Movement < 20m treated as stationary
-  STATIONARY_SPEED_THRESHOLD_MS: 0.8,    // < 0.8 m/s (~2.8 km/h) = stationary
-  MIN_STOP_DURATION_SECONDS: 300,        // 5 mins dwell time to form a Stop Pin
+  // Live map freshness thresholds (seconds)
+  LIVE_FRESH_SECONDS: 60,
+  LIVE_STALE_SECONDS: 120,
 
-  // Anti-Spoofing & Safety
+  // Stop / dwell detection
+  STATIONARY_RADIUS_METERS: 35,
+  STATIONARY_SPEED_THRESHOLD_MS: 0.8,
+  MIN_STOP_DURATION_SECONDS: 300,
+
+  // Anti-spoofing
   MAX_REALISTIC_SPEED_KMH: 180,
   ALLOW_MOCK_LOCATIONS: false,
 } as const;

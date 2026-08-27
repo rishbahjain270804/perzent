@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   AppState,
+  Linking,
   Modal,
   RefreshControl,
   ScrollView,
@@ -12,14 +14,57 @@ import {
   View,
 } from 'react-native';
 import { DeviceIntegrityService, WorkReadiness } from '../services/DeviceIntegrityService';
-import { EmployeeApi } from '../services/EmployeeApi';
+import { ApiError, EmployeeApi, isUnauthorizedError } from '../services/EmployeeApi';
 import { AutoUpdateService } from '../services/AutoUpdateService';
-import { ShiftNotificationService } from '../services/ShiftNotificationService';
 import { WaypointQueueService } from '../services/WaypointQueueService';
 import { BackgroundTrackingService } from '../services/BackgroundTrackingService';
+import { SessionEvents } from '../services/SessionEvents';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM';
+type PendingAction = 'CHECK_IN' | 'START_BREAK' | 'RESUME' | 'CHECK_OUT' | null;
+type ShiftPolicy = { timezone: string; auto_checkout_time: string; max_break_minutes: number };
+
+const DEFAULT_POLICY: ShiftPolicy = { timezone: 'Asia/Kolkata', auto_checkout_time: '23:40', max_break_minutes: 30 };
+const READINESS_INTERVAL_MS = 15_000;
+const JS_PING_INTERVAL_MS = 15_000;
+const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
+const PRIVACY_POLICY_URL = 'https://perzent.vercel.app/privacy';
+/** Server codes that mean our local shift state drifted from the server's: re-sync after showing the error. */
+const STATE_DRIFT_CODES = new Set(['NO_ACTIVE_SHIFT', 'SHIFT_ACTIVE', 'BREAK_ACTIVE', 'NO_ACTIVE_BREAK']);
+
+const formatDuration = (totalSeconds: number) => {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '00:00:00';
+  const total = Math.floor(totalSeconds);
+  const hours = Math.floor(total / 3600).toString().padStart(2, '0');
+  const minutes = Math.floor((total % 3600) / 60).toString().padStart(2, '0');
+  const seconds = (total % 60).toString().padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
+
+/** "23:40" -> "11:40 PM" */
+const formatClockTime = (hhmm: string) => {
+  const [h, m] = String(hhmm || '').split(':').map((part) => parseInt(part, 10));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${suffix}`;
+};
+
+const normalizePolicy = (raw: any): ShiftPolicy => ({
+  timezone: typeof raw?.timezone === 'string' && raw.timezone ? raw.timezone : DEFAULT_POLICY.timezone,
+  auto_checkout_time:
+    typeof raw?.auto_checkout_time === 'string' && raw.auto_checkout_time
+      ? raw.auto_checkout_time
+      : DEFAULT_POLICY.auto_checkout_time,
+  max_break_minutes:
+    Number.isFinite(Number(raw?.max_break_minutes)) && Number(raw.max_break_minutes) > 0
+      ? Number(raw.max_break_minutes)
+      : DEFAULT_POLICY.max_break_minutes,
+});
+
+const toShiftStatus = (status: unknown): ShiftStatus =>
+  status === 'CHECKED_IN' ? 'CHECKED_IN' : status === 'ON_BREAK' ? 'ON_BREAK' : 'CHECKED_OUT';
 
 export default function DutyDashboardScreen({
   session,
@@ -31,6 +76,7 @@ export default function DutyDashboardScreen({
   onLogout: () => void;
 }) {
   const isManager = session.role === 'MANAGER';
+  const userId: string = session.user_id || session.id || '';
   const [activeTab, setActiveTab] = useState<ManagerTab>('DUTY');
 
   // Duty / Shift States
@@ -38,12 +84,17 @@ export default function DutyDashboardScreen({
   const [alreadyCompletedToday, setAlreadyCompletedToday] = useState(false);
   const [punchInTimestamp, setPunchInTimestamp] = useState<number | null>(null);
   const [breakStartTimestamp, setBreakStartTimestamp] = useState<number | null>(null);
+  const [totalBreakMinutes, setTotalBreakMinutes] = useState(0);
+  const [policy, setPolicy] = useState<ShiftPolicy>(DEFAULT_POLICY);
   const [serverTimeOffset, setServerTimeOffset] = useState<number>(0);
   const [lastWaypointTime, setLastWaypointTime] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [breakTimerSec, setBreakTimerSec] = useState(1800);
+  const [breakTimerSec, setBreakTimerSec] = useState(DEFAULT_POLICY.max_break_minutes * 60);
   const [readiness, setReadiness] = useState<WorkReadiness | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [disclosureVisible, setDisclosureVisible] = useState(false);
+  const [requestingPermission, setRequestingPermission] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   // Manager Team Tracking States
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -54,78 +105,133 @@ export default function DutyDashboardScreen({
   const [newEmpPassword, setNewEmpPassword] = useState('');
   const [newEmpDesignation, setNewEmpDesignation] = useState('');
   const [addingEmployee, setAddingEmployee] = useState(false);
+  const [resettingMemberId, setResettingMemberId] = useState<string | null>(null);
 
-  const refreshReadiness = useCallback(async (sendToOwner = false) => {
-    try {
-      const next = await DeviceIntegrityService.inspect();
-      setReadiness(next);
-      if (sendToOwner) {
-        await EmployeeApi.attendance(session, 'PATCH', {
-          telemetry: next.telemetry,
-          device: deviceInfo,
-        }).catch(() => undefined);
-      }
-      return next;
-    } catch {
-      return null;
-    }
-  }, [deviceInfo, session]);
+  const shiftStatusRef = useRef<ShiftStatus>('CHECKED_OUT');
+  const serverOffsetRef = useRef(0);
+  const lastTelemetryPatchRef = useRef(0);
+  const disclosureShownRef = useRef(false);
+  const permissionAlertShownRef = useRef(false);
+  const busy = pendingAction !== null;
 
-  const formatDuration = (totalSeconds: number) => {
-    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '00:00:00';
-    const total = Math.floor(totalSeconds);
-    const hours = Math.floor(total / 3600).toString().padStart(2, '0');
-    const minutes = Math.floor((total % 3600) / 60).toString().padStart(2, '0');
-    const seconds = (total % 60).toString().padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
+  useEffect(() => {
+    shiftStatusRef.current = shiftStatus;
+  }, [shiftStatus]);
+
+  const serverNow = () => Date.now() + serverOffsetRef.current;
+
+  const applyServerTime = (serverTime: unknown) => {
+    if (typeof serverTime !== 'string') return;
+    const parsed = new Date(serverTime).getTime();
+    if (!Number.isFinite(parsed)) return;
+    serverOffsetRef.current = parsed - Date.now();
+    setServerTimeOffset(serverOffsetRef.current);
   };
 
-  const updateClocks = useCallback(() => {
-    const currentServerNow = Date.now() + serverTimeOffset;
-    if (punchInTimestamp && shiftStatus === 'CHECKED_IN') {
-      const sec = Math.max(0, Math.floor((currentServerNow - punchInTimestamp) / 1000));
-      setElapsedSec(sec);
-      ShiftNotificationService.updateLiveNotification(formatDuration(sec), 'CHECKED_IN');
-    }
-    if (breakStartTimestamp && shiftStatus === 'ON_BREAK') {
-      const used = Math.floor((currentServerNow - breakStartTimestamp) / 1000);
-      setBreakTimerSec(Math.max(0, 1800 - used));
-      ShiftNotificationService.updateLiveNotification(formatDuration(used), 'ON_BREAK');
-    }
-  }, [punchInTimestamp, breakStartTimestamp, shiftStatus, serverTimeOffset]);
+  /** Applies a GET /api/mobile/attendance payload to local state; returns the resolved status + punch-in time. */
+  const applyAttendance = useCallback((data: any): { status: ShiftStatus; punchInAt: number | null } => {
+    applyServerTime(data?.server_time);
+    const status = toShiftStatus(data?.status);
+    const nextPolicy = normalizePolicy(data?.policy);
+    const now = Date.now() + serverOffsetRef.current;
 
-  const syncAttendanceState = useCallback(() => {
-    return EmployeeApi.attendance(session)
-      .then((data) => {
-        if (data.server_time) {
-          const offset = new Date(data.server_time).getTime() - Date.now();
-          setServerTimeOffset(offset);
-        }
-        const status = data.status === 'AUTO_CHECKED_OUT' ? 'CHECKED_OUT' : data.status;
-        setShiftStatus(status);
-        setAlreadyCompletedToday(Boolean(data.already_completed_today));
+    setPolicy(nextPolicy);
+    setShiftStatus(status);
+    setAlreadyCompletedToday(Boolean(data?.already_completed_today));
+    setTotalBreakMinutes(Number(data?.total_break_minutes) || 0);
 
-        if (data.punch_in_time) {
-          const t = new Date(data.punch_in_time).getTime();
-          setPunchInTimestamp(t);
-          const currentServerNow = Date.now() + (data.server_time ? new Date(data.server_time).getTime() - Date.now() : 0);
-          setElapsedSec(Math.max(0, Math.floor((currentServerNow - t) / 1000)));
+    let punchInAt: number | null = null;
+    if (status !== 'CHECKED_OUT' && data?.punch_in_time) {
+      punchInAt = new Date(data.punch_in_time).getTime();
+      setPunchInTimestamp(punchInAt);
+      setElapsedSec(Math.max(0, Math.floor((now - punchInAt) / 1000)));
+    } else {
+      setPunchInTimestamp(null);
+      setElapsedSec(0);
+    }
+
+    if (status === 'ON_BREAK' && data?.active_break_started_at) {
+      const breakStart = new Date(data.active_break_started_at).getTime();
+      setBreakStartTimestamp(breakStart);
+      setBreakTimerSec(Math.max(0, nextPolicy.max_break_minutes * 60 - Math.floor((now - breakStart) / 1000)));
+    } else {
+      setBreakStartTimestamp(null);
+      setBreakTimerSec(nextPolicy.max_break_minutes * 60);
+    }
+    return { status, punchInAt };
+  }, []);
+
+  const refreshReadiness = useCallback(
+    async (options: { forceUpload?: boolean } = {}) => {
+      try {
+        const next = await DeviceIntegrityService.inspect();
+        setReadiness(next);
+        // Telemetry cadence: every 15 s while a shift is open, at most every 10 min while off duty.
+        const shiftOpen = shiftStatusRef.current !== 'CHECKED_OUT';
+        const offDutyDue = Date.now() - lastTelemetryPatchRef.current >= OFF_DUTY_TELEMETRY_INTERVAL_MS;
+        if (options.forceUpload || shiftOpen || offDutyDue) {
+          lastTelemetryPatchRef.current = Date.now();
+          await EmployeeApi.attendance(session, 'PATCH', {
+            telemetry: next.telemetry,
+            device: deviceInfo,
+          }).catch(() => undefined);
         }
-        if (data.active_break_started_at) {
-          const bt = new Date(data.active_break_started_at).getTime();
-          setBreakStartTimestamp(bt);
-          const currentServerNow = Date.now() + (data.server_time ? new Date(data.server_time).getTime() - Date.now() : 0);
-          const used = Math.floor((currentServerNow - bt) / 1000);
-          setBreakTimerSec(Math.max(0, 1800 - used));
+        return next;
+      } catch {
+        return null;
+      }
+    },
+    [deviceInfo, session]
+  );
+
+  /**
+   * Makes the native service match the server's shift status and reacts to flags the
+   * service raised while the JS side was asleep (401 / 409 / permission revoked).
+   */
+  const reconcileTracking = useCallback(
+    async (status: ShiftStatus, punchInAt: number | null) => {
+      const state = await BackgroundTrackingService.getState();
+      if (state.auth_invalid) {
+        await BackgroundTrackingService.clearFlags();
+        await BackgroundTrackingService.stop();
+        SessionEvents.emitUnauthorized();
+        return;
+      }
+      if (state.shift_ended_remotely || state.permission_revoked) {
+        await BackgroundTrackingService.clearFlags();
+        if (state.permission_revoked && !permissionAlertShownRef.current) {
+          permissionAlertShownRef.current = true;
+          Alert.alert(
+            'Location permission turned off',
+            'Live location sharing stopped because location permission was revoked. Set it back to "Allow all the time" to continue your shift.'
+          );
+          refreshReadiness();
         }
-        if (status === 'CHECKED_IN') {
-          BackgroundTrackingService.start(session.token, session.id || session.user_id);
-        } else if (status === 'CHECKED_OUT') {
-          BackgroundTrackingService.stop();
+      }
+      const running = state.tracking_active && !state.shift_ended_remotely && !state.permission_revoked;
+      if (status === 'CHECKED_IN') {
+        if (!running) {
+          const permission = await DeviceIntegrityService.getLocationPermissionState();
+          if (permission.foreground) {
+            await BackgroundTrackingService.start(session.token, userId, punchInAt ?? serverNow());
+          }
         }
-      })
-      .catch((error) => Alert.alert('Sync failed', error.message));
-  }, [session]);
+      } else if (running) {
+        await BackgroundTrackingService.stop();
+      }
+    },
+    [session, userId, refreshReadiness]
+  );
+
+  const syncAttendanceState = useCallback(async () => {
+    try {
+      const data = await EmployeeApi.attendance(session);
+      const applied = applyAttendance(data);
+      await reconcileTracking(applied.status, applied.punchInAt);
+    } catch (error: any) {
+      console.warn('Background attendance sync skipped/retry:', error?.message || error);
+    }
+  }, [session, applyAttendance, reconcileTracking]);
 
   const loadManagerTeam = useCallback(async () => {
     if (!isManager) return;
@@ -135,63 +241,99 @@ export default function DutyDashboardScreen({
       if (Array.isArray(team)) {
         setTeamMembers(team);
       }
-    } catch (err: any) {
-      // Silent or toast
+    } catch {
+      // Silent; the pull-to-refresh spinner already signals the retry path.
     } finally {
       setTeamLoading(false);
     }
   }, [isManager, session]);
 
+  // Mount: sync shift state, inspect the device, and show the location disclosure once if needed.
   useEffect(() => {
-    syncAttendanceState();
-    refreshReadiness(true);
-    if (isManager) loadManagerTeam();
-
-    const complianceTimer = setInterval(() => {
-      refreshReadiness(true);
+    let mounted = true;
+    (async () => {
+      await syncAttendanceState();
+      await refreshReadiness({ forceUpload: true });
       if (isManager) loadManagerTeam();
-    }, 15_000);
-    return () => clearInterval(complianceTimer);
+      const permission = await DeviceIntegrityService.getLocationPermissionState();
+      if (mounted && !permission.complete && !disclosureShownRef.current) {
+        disclosureShownRef.current = true;
+        setDisclosureVisible(true);
+      }
+    })();
+
+    const timer = setInterval(async () => {
+      refreshReadiness();
+      if (isManager) loadManagerTeam();
+      const state = await BackgroundTrackingService.getState();
+      if (state.auth_invalid || state.shift_ended_remotely || state.permission_revoked) {
+        syncAttendanceState();
+      }
+    }, READINESS_INTERVAL_MS);
+
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, [syncAttendanceState, refreshReadiness, isManager, loadManagerTeam]);
 
-  // AppState listener: immediately re-sync server attendance & re-compute clocks when app becomes active
+  // AppState listener: re-sync attendance, reconcile the native service and re-inspect on resume.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
         syncAttendanceState();
-        updateClocks();
-        refreshReadiness(true);
+        refreshReadiness();
         if (isManager) loadManagerTeam();
       }
     });
     return () => subscription.remove();
-  }, [syncAttendanceState, updateClocks, refreshReadiness, isManager, loadManagerTeam]);
+  }, [syncAttendanceState, refreshReadiness, isManager, loadManagerTeam]);
 
-  // Real-time ticking clock based on absolute time differences
+  // 1-second clock. The persistent notification is owned by the native service (refreshes itself every 15 s).
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN' && shiftStatus !== 'ON_BREAK') return;
-    updateClocks();
-    const timer = setInterval(updateClocks, 1000);
+    const tick = () => {
+      const now = Date.now() + serverTimeOffset;
+      if (punchInTimestamp && shiftStatus === 'CHECKED_IN') {
+        setElapsedSec(Math.max(0, Math.floor((now - punchInTimestamp) / 1000)));
+      }
+      if (breakStartTimestamp && shiftStatus === 'ON_BREAK') {
+        const used = Math.floor((now - breakStartTimestamp) / 1000);
+        setBreakTimerSec(Math.max(0, policy.max_break_minutes * 60 - used));
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [shiftStatus, updateClocks]);
+  }, [shiftStatus, punchInTimestamp, breakStartTimestamp, serverTimeOffset, policy.max_break_minutes]);
 
-  // High-frequency 15-second background waypoint ping while checked in with resilient offline queuing
+  // JS-side 15 s waypoint ping while checked in (complements the native service; offline-queued).
   useEffect(() => {
     if (shiftStatus !== 'CHECKED_IN') return;
+    let cancelled = false;
     const pingLocation = async () => {
       try {
         const pos = await EmployeeApi.currentPosition();
-        await WaypointQueueService.recordPosition(session, pos);
+        const result = await WaypointQueueService.recordPosition(session, pos);
+        if (cancelled) return;
+        if (result.outcome === 'NO_ACTIVE_SHIFT') {
+          await BackgroundTrackingService.stop();
+          syncAttendanceState();
+          return;
+        }
+        if (result.outcome === 'AUTH_INVALID') return;
         setLastWaypointTime(Date.now());
       } catch {
-        // Enqueue if pos was captured or keep queue intact
+        // GPS unavailable right now; the stalled banner covers the user-facing side.
       }
     };
     pingLocation();
-    const locInterval = setInterval(pingLocation, 15_000);
-
-    return () => clearInterval(locInterval);
-  }, [shiftStatus, session]);
+    const locInterval = setInterval(pingLocation, JS_PING_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(locInterval);
+    };
+  }, [shiftStatus, session, syncAttendanceState]);
 
   const isGpsStalled = Boolean(
     shiftStatus === 'CHECKED_IN' &&
@@ -199,9 +341,30 @@ export default function DutyDashboardScreen({
     Date.now() - lastWaypointTime > 120_000
   );
 
+  const showActionError = (title: string, error: unknown) => {
+    if (isUnauthorizedError(error)) return; // App.tsx is already returning to Login.
+    const message = error instanceof Error && error.message ? error.message : 'Something went wrong. Please try again.';
+    Alert.alert(title, message);
+    if (error instanceof ApiError && error.code && STATE_DRIFT_CODES.has(error.code)) {
+      syncAttendanceState();
+    }
+  };
+
+  /** Location permission (incl. "Allow all the time" on Android 10+) and notifications must be in place before duty. */
+  const ensurePermissionsForDuty = async (): Promise<boolean> => {
+    const permission = await DeviceIntegrityService.getLocationPermissionState();
+    if (!permission.complete) {
+      setDisclosureVisible(true);
+      return false;
+    }
+    await DeviceIntegrityService.ensureNotificationPermission();
+    return true;
+  };
+
   const verifiedReadiness = async () => {
-    const next = await DeviceIntegrityService.inspect({ requestPermission: true, acquirePosition: true });
+    const next = await DeviceIntegrityService.inspect({ acquirePosition: true });
     setReadiness(next);
+    lastTelemetryPatchRef.current = Date.now();
     await EmployeeApi.attendance(session, 'PATCH', {
       telemetry: next.telemetry,
       device: deviceInfo,
@@ -215,56 +378,73 @@ export default function DutyDashboardScreen({
   };
 
   const handleCheckIn = async () => {
-    setActionLoading(true);
+    if (busy) return;
+    setPendingAction('CHECK_IN');
     try {
+      if (!(await ensurePermissionsForDuty())) return;
       const verified = await verifiedReadiness();
       if (!verified?.position) return;
       const result = await EmployeeApi.attendance(session, 'POST', {
         action: 'check_in',
-        ...verified.position,
+        latitude: verified.position.latitude,
+        longitude: verified.position.longitude,
+        accuracy: verified.position.accuracy ?? 10,
         integrity: verified.telemetry,
       });
-      const punchTime = result.punch_in_time ? new Date(result.punch_in_time).getTime() : Date.now();
+      applyServerTime(result?.server_time);
+      const punchTime = result?.punch_in_time ? new Date(result.punch_in_time).getTime() : serverNow();
       setPunchInTimestamp(punchTime);
+      setElapsedSec(Math.max(0, Math.floor((serverNow() - punchTime) / 1000)));
+      setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
-      const initialSec = Math.max(0, Math.floor((Date.now() - punchTime) / 1000));
-      setElapsedSec(initialSec);
-      setShiftStatus(result.status);
-      ShiftNotificationService.updateLiveNotification(formatDuration(initialSec), 'CHECKED_IN');
-      BackgroundTrackingService.start(session.token, session.id || session.user_id);
-      Alert.alert('Shift started', 'Your location and attendance were verified.');
-    } catch (error: any) {
-      Alert.alert('Check-in failed', error.message);
+      setAlreadyCompletedToday(false);
+      setShiftStatus(toShiftStatus(result?.status) === 'CHECKED_OUT' ? 'CHECKED_IN' : toShiftStatus(result?.status));
+      await BackgroundTrackingService.start(session.token, userId, punchTime);
+      Alert.alert(
+        'Shift started',
+        'Your location and attendance were verified. Live location sharing stays on until you start a break or check out.'
+      );
+    } catch (error) {
+      showActionError('Check-in failed', error);
     } finally {
-      setActionLoading(false);
+      setPendingAction(null);
     }
   };
 
   const handleCheckOut = () => {
+    if (busy) return;
     Alert.alert('End shift?', 'Your checkout location will be verified before the shift ends.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Check out',
         style: 'destructive',
         onPress: async () => {
-          setActionLoading(true);
+          setPendingAction('CHECK_OUT');
           try {
             const position = await EmployeeApi.currentPosition();
-            await WaypointQueueService.flushQueue(session).catch(() => undefined);
-            await EmployeeApi.attendance(session, 'POST', { action: 'check_out', ...position });
-            await ShiftNotificationService.dismiss();
+            // Drain every queued batch before the shift closes (409 afterwards would drop them).
+            const flush = await WaypointQueueService.flushQueue(session, { force: true });
+            if (flush.outcome === 'AUTH_INVALID') return;
+            const result = await EmployeeApi.attendance(session, 'POST', {
+              action: 'check_out',
+              latitude: position.latitude,
+              longitude: position.longitude,
+              accuracy: position.accuracy,
+            });
+            applyServerTime(result?.server_time);
             await BackgroundTrackingService.stop();
-            await WaypointQueueService.clear().catch(() => undefined);
+            await WaypointQueueService.clear();
             setShiftStatus('CHECKED_OUT');
             setAlreadyCompletedToday(true);
             setPunchInTimestamp(null);
             setBreakStartTimestamp(null);
             setLastWaypointTime(null);
             setElapsedSec(0);
-          } catch (error: any) {
-            Alert.alert('Check-out failed', error.message);
+            syncAttendanceState();
+          } catch (error) {
+            showActionError('Check-out failed', error);
           } finally {
-            setActionLoading(false);
+            setPendingAction(null);
           }
         },
       },
@@ -272,44 +452,96 @@ export default function DutyDashboardScreen({
   };
 
   const handleStartBreak = () => {
-    Alert.alert('Start break?', 'Work location tracking pauses during your break.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Start break',
-        onPress: async () => {
-          setActionLoading(true);
-          try {
-            const result = await EmployeeApi.attendance(session, 'POST', { action: 'start_break' });
-            setShiftStatus('ON_BREAK');
-            const bt = result.break_start_time ? new Date(result.break_start_time).getTime() : Date.now();
-            setBreakStartTimestamp(bt);
-            setBreakTimerSec(1800);
-            ShiftNotificationService.updateLiveNotification('00:00:00', 'ON_BREAK');
-          } catch (error: any) {
-            Alert.alert('Break failed', error.message);
-          } finally {
-            setActionLoading(false);
-          }
+    if (busy) return;
+    Alert.alert(
+      'Start break?',
+      `Location sharing pauses during your break. Breaks are limited to ${policy.max_break_minutes} minutes.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start break',
+          onPress: async () => {
+            setPendingAction('START_BREAK');
+            try {
+              const result = await EmployeeApi.attendance(session, 'POST', { action: 'start_break', break_type: 'GENERAL' });
+              applyServerTime(result?.server_time);
+              // Tracking really pauses: native service + JS pinger both stop.
+              await BackgroundTrackingService.stop();
+              await WaypointQueueService.flushQueue(session, { force: true }).catch(() => undefined);
+              const breakStart = result?.active_break_started_at
+                ? new Date(result.active_break_started_at).getTime()
+                : serverNow();
+              setBreakStartTimestamp(breakStart);
+              setBreakTimerSec(policy.max_break_minutes * 60);
+              setShiftStatus('ON_BREAK');
+            } catch (error) {
+              showActionError('Break failed', error);
+            } finally {
+              setPendingAction(null);
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleResume = async () => {
-    setActionLoading(true);
+    if (busy) return;
+    setPendingAction('RESUME');
     try {
+      if (!(await ensurePermissionsForDuty())) return;
       const verified = await verifiedReadiness();
       if (!verified) return;
-      await EmployeeApi.attendance(session, 'POST', { action: 'resume', integrity: verified.telemetry });
-      setShiftStatus('CHECKED_IN');
+      const result = await EmployeeApi.attendance(session, 'POST', { action: 'resume', integrity: verified.telemetry });
+      applyServerTime(result?.server_time);
+      const punchTime = result?.punch_in_time
+        ? new Date(result.punch_in_time).getTime()
+        : punchInTimestamp ?? serverNow();
+      setPunchInTimestamp(punchTime);
       setBreakStartTimestamp(null);
       setLastWaypointTime(Date.now());
-      ShiftNotificationService.updateLiveNotification(formatDuration(elapsedSec), 'CHECKED_IN');
-      BackgroundTrackingService.start(session.token, session.id || session.user_id);
-    } catch (error: any) {
-      Alert.alert('Resume failed', error.message);
+      setShiftStatus('CHECKED_IN');
+      await BackgroundTrackingService.start(session.token, userId, punchTime);
+    } catch (error) {
+      showActionError('Resume failed', error);
     } finally {
-      setActionLoading(false);
+      setPendingAction(null);
+    }
+  };
+
+  const handleDisclosureContinue = async () => {
+    if (requestingPermission) return;
+    setRequestingPermission(true);
+    try {
+      const permission = await DeviceIntegrityService.requestLocationPermissions();
+      if (permission.complete) {
+        setDisclosureVisible(false);
+      } else {
+        setDisclosureVisible(false);
+        Alert.alert(
+          'One more step',
+          permission.foreground
+            ? 'Open app settings and set Location permission to "Allow all the time" so tracking keeps working while the app is in the background.'
+            : 'Location permission was not granted. You can enable it in app settings when you are ready to start a shift.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: () => DeviceIntegrityService.openAppSettings() },
+          ]
+        );
+      }
+      refreshReadiness();
+    } finally {
+      setRequestingPermission(false);
+    }
+  };
+
+  const handleManualUpdateCheck = async () => {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      await AutoUpdateService.manualCheck();
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -318,6 +550,11 @@ export default function DutyDashboardScreen({
       Alert.alert('Validation Error', 'Full name, 10-digit mobile number, and password are required.');
       return;
     }
+    if (newEmpPassword.trim().length < 6) {
+      Alert.alert('Validation Error', 'Password must be at least 6 characters.');
+      return;
+    }
+    if (addingEmployee) return;
     setAddingEmployee(true);
     try {
       await EmployeeApi.addEmployee(session, {
@@ -333,14 +570,15 @@ export default function DutyDashboardScreen({
       setNewEmpPassword('');
       setNewEmpDesignation('');
       loadManagerTeam();
-    } catch (err: any) {
-      Alert.alert('Could not add employee', err.message);
+    } catch (error) {
+      showActionError('Could not add employee', error);
     } finally {
       setAddingEmployee(false);
     }
   };
 
   const handleResetDevice = (memberId: string, memberName: string) => {
+    if (resettingMemberId) return;
     Alert.alert(
       'Reset Device Binding?',
       `Are you sure you want to reset device binding for ${memberName}? They will be able to log in on a new device.`,
@@ -350,19 +588,21 @@ export default function DutyDashboardScreen({
           text: 'Reset Device',
           style: 'destructive',
           onPress: async () => {
+            setResettingMemberId(memberId);
             try {
               await EmployeeApi.resetDeviceBinding(session, memberId);
               Alert.alert('Device Reset', `Device binding for ${memberName} was reset.`);
               loadManagerTeam();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
+            } catch (error) {
+              showActionError('Error', error);
+            } finally {
+              setResettingMemberId(null);
             }
           },
         },
       ]
     );
   };
-
 
   const statusLabel = shiftStatus === 'CHECKED_IN'
     ? 'On duty'
@@ -372,6 +612,15 @@ export default function DutyDashboardScreen({
         ? 'Shift completed'
         : 'Not checked in';
 
+  const timerCaption = shiftStatus === 'ON_BREAK'
+    ? breakTimerSec > 0
+      ? `Break time remaining (max ${policy.max_break_minutes} min)`
+      : 'Break limit reached - please resume your shift'
+    : shiftStatus === 'CHECKED_IN'
+      ? `Shift duration • Auto check-out at ${formatClockTime(policy.auto_checkout_time)}`
+      : 'Shift duration (Server Synced)';
+
+  const hasPermissionBlocker = Boolean(readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION'));
   const onDutyCount = teamMembers.filter((m) => m.shift_status === 'CHECKED_IN').length;
   const stalledCount = teamMembers.filter((m) => m.is_gps_disconnected).length;
 
@@ -393,7 +642,7 @@ export default function DutyDashboardScreen({
             <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={onLogout} style={styles.logoutButton}>
+        <TouchableOpacity onPress={onLogout} style={styles.logoutButton} disabled={busy}>
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </View>
@@ -437,7 +686,7 @@ export default function DutyDashboardScreen({
                 style={[
                   styles.statusDot,
                   shiftStatus === 'CHECKED_IN' && styles.statusDotActive,
-                  alreadyCompletedToday && styles.statusDotCompleted,
+                  shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && styles.statusDotCompleted,
                 ]}
               />
               <Text style={styles.statusLabel}>{statusLabel}</Text>
@@ -449,10 +698,19 @@ export default function DutyDashboardScreen({
                   ? formatDuration(elapsedSec)
                   : '00:00:00'}
             </Text>
-            <Text style={styles.timerCaption}>
-              {shiftStatus === 'ON_BREAK' ? 'Break time remaining' : 'Shift duration (Server Synced)'}
-            </Text>
+            <Text style={styles.timerCaption}>{timerCaption}</Text>
           </View>
+
+          {shiftStatus === 'CHECKED_OUT' && alreadyCompletedToday && (
+            <View style={styles.completedCard}>
+              <Text style={styles.completedIcon}>✅</Text>
+              <Text style={styles.completedTitle}>Shift completed for today</Text>
+              <Text style={styles.completedSubtitle}>
+                Breaks used: {totalBreakMinutes} min • Shifts auto-close at {formatClockTime(policy.auto_checkout_time)}.
+                You can still start another shift if your manager needs you.
+              </Text>
+            </View>
+          )}
 
           <View style={[styles.readinessCard, readiness?.ready ? styles.readyCard : styles.blockedCard]}>
             <View style={styles.readinessHeading}>
@@ -471,9 +729,9 @@ export default function DutyDashboardScreen({
             {readiness?.blockers.map((blocker) => (
               <Text key={blocker.code} style={styles.blockerText}>• {blocker.message}</Text>
             ))}
-            {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
-              <TouchableOpacity style={styles.settingsButton} onPress={() => DeviceIntegrityService.requestAlwaysPermission()}>
-                <Text style={styles.settingsButtonText}>Enable "Allow all the time"</Text>
+            {hasPermissionBlocker && (
+              <TouchableOpacity style={styles.settingsButton} onPress={() => setDisclosureVisible(true)}>
+                <Text style={styles.settingsButtonText}>Enable location sharing</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -481,22 +739,51 @@ export default function DutyDashboardScreen({
           {/* When Checked Out: Show Check In Button */}
           {shiftStatus === 'CHECKED_OUT' && (
             <TouchableOpacity
-              style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
+              style={[styles.primaryButton, busy && styles.buttonDisabled]}
               onPress={handleCheckIn}
-              disabled={actionLoading}
+              disabled={busy}
             >
-              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : alreadyCompletedToday ? 'Start Another Shift' : 'Check in'}</Text>
+              {pendingAction === 'CHECK_IN' ? (
+                <View style={styles.buttonRow}>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.primaryButtonText}>Verifying…</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>{alreadyCompletedToday ? 'Start Another Shift' : 'Check in'}</Text>
+              )}
             </TouchableOpacity>
           )}
 
-          {/* When Checked In: Show Break & Check Out buttons (NO Check In button) */}
+          {/* When Checked In: Show Break & Check Out buttons */}
           {shiftStatus === 'CHECKED_IN' && (
             <View style={styles.actionStack}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={handleStartBreak} disabled={actionLoading}>
-                <Text style={styles.secondaryButtonText}>Start break</Text>
+              <TouchableOpacity
+                style={[styles.secondaryButton, busy && styles.buttonDisabled]}
+                onPress={handleStartBreak}
+                disabled={busy}
+              >
+                {pendingAction === 'START_BREAK' ? (
+                  <View style={styles.buttonRow}>
+                    <ActivityIndicator color="#15803D" />
+                    <Text style={styles.secondaryButtonText}>Starting break…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.secondaryButtonText}>Start break</Text>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckOut} disabled={actionLoading}>
-                <Text style={styles.checkoutButtonText}>Check out</Text>
+              <TouchableOpacity
+                style={[styles.checkoutButton, busy && styles.buttonDisabled]}
+                onPress={handleCheckOut}
+                disabled={busy}
+              >
+                {pendingAction === 'CHECK_OUT' ? (
+                  <View style={styles.buttonRow}>
+                    <ActivityIndicator color="#B91C1C" />
+                    <Text style={styles.checkoutButtonText}>Checking out…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.checkoutButtonText}>Check out</Text>
+                )}
               </TouchableOpacity>
             </View>
           )}
@@ -504,19 +791,29 @@ export default function DutyDashboardScreen({
           {/* When On Break: Show Resume Button */}
           {shiftStatus === 'ON_BREAK' && (
             <TouchableOpacity
-              style={[styles.primaryButton, actionLoading && styles.buttonDisabled]}
+              style={[styles.primaryButton, busy && styles.buttonDisabled]}
               onPress={handleResume}
-              disabled={actionLoading}
+              disabled={busy}
             >
-              <Text style={styles.primaryButtonText}>{actionLoading ? 'Checking…' : 'Resume shift'}</Text>
+              {pendingAction === 'RESUME' ? (
+                <View style={styles.buttonRow}>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.primaryButtonText}>Verifying…</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>Resume shift</Text>
+              )}
             </TouchableOpacity>
           )}
 
           <View style={styles.privacyNote}>
             <Text style={styles.privacyTitle}>Privacy during work</Text>
             <Text style={styles.privacyText}>
-              Location is used for attendance and active-shift tracking. Device compliance details are shared only with authorized management.
+              Your precise location is shared with your employer only while you are checked in. Sharing pauses on breaks and stops at check-out. Device compliance details are visible only to authorized management.
             </Text>
+            <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}>
+              <Text style={styles.privacyLink}>Read the privacy policy</Text>
+            </TouchableOpacity>
           </View>
 
           {/* App Version & Manual Update Card */}
@@ -528,10 +825,15 @@ export default function DutyDashboardScreen({
               </Text>
             </View>
             <TouchableOpacity
-              style={styles.checkUpdateButton}
-              onPress={() => AutoUpdateService.manualCheck()}
+              style={[styles.checkUpdateButton, checkingUpdate && styles.buttonDisabled]}
+              onPress={handleManualUpdateCheck}
+              disabled={checkingUpdate}
             >
-              <Text style={styles.checkUpdateButtonText}>Check for Updates</Text>
+              {checkingUpdate ? (
+                <ActivityIndicator size="small" color="#166534" />
+              ) : (
+                <Text style={styles.checkUpdateButtonText}>Check for Updates</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -540,7 +842,6 @@ export default function DutyDashboardScreen({
       {/* --- TAB 2: MANAGER TEAM TRACKING & ADD EMPLOYEE --- */}
       {isManager && activeTab === 'TEAM' && (
         <View style={styles.teamContainer}>
-          {/* Header Action: Add Employee */}
           <TouchableOpacity
             style={styles.addEmployeeTopButton}
             onPress={() => setAddEmployeeModalVisible(true)}
@@ -548,7 +849,6 @@ export default function DutyDashboardScreen({
             <Text style={styles.addEmployeeTopButtonText}>+ Add New Team Employee</Text>
           </TouchableOpacity>
 
-          {/* Team Quick Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={styles.statNumber}>{teamMembers.length}</Text>
@@ -564,7 +864,6 @@ export default function DutyDashboardScreen({
             </View>
           </View>
 
-          {/* Employee Cards List */}
           <Text style={styles.sectionHeader}>Field Team ({teamMembers.length})</Text>
           {teamMembers.length === 0 ? (
             <View style={styles.emptyCard}>
@@ -576,6 +875,7 @@ export default function DutyDashboardScreen({
               const isOnDuty = member.shift_status === 'CHECKED_IN';
               const isOnBreak = member.shift_status === 'ON_BREAK';
               const isDisconnected = member.is_gps_disconnected;
+              const isResetting = resettingMemberId === member.user_id;
 
               return (
                 <View key={member.user_id} style={styles.memberCard}>
@@ -607,7 +907,6 @@ export default function DutyDashboardScreen({
                     </View>
                   </View>
 
-                  {/* Location & Ping Details */}
                   <View style={styles.memberDetails}>
                     <Text style={styles.memberDetailRow}>
                       📍 <Text style={styles.detailLabel}>Location:</Text> {member.current_location?.address_name || 'No GPS ping received'}
@@ -622,12 +921,19 @@ export default function DutyDashboardScreen({
                     </Text>
                   </View>
 
-                  {/* Reset Device Binding Button */}
                   <TouchableOpacity
-                    style={styles.resetBindingButton}
+                    style={[styles.resetBindingButton, (isResetting || Boolean(resettingMemberId)) && styles.buttonDisabled]}
                     onPress={() => handleResetDevice(member.user_id, member.full_name)}
+                    disabled={Boolean(resettingMemberId)}
                   >
-                    <Text style={styles.resetBindingText}>Reset Phone Binding</Text>
+                    {isResetting ? (
+                      <View style={styles.buttonRow}>
+                        <ActivityIndicator size="small" color="#475569" />
+                        <Text style={styles.resetBindingText}>Resetting…</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.resetBindingText}>Reset Phone Binding</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               );
@@ -641,7 +947,7 @@ export default function DutyDashboardScreen({
         visible={addEmployeeModalVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setAddEmployeeModalVisible(false)}
+        onRequestClose={() => !addingEmployee && setAddEmployeeModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
@@ -665,7 +971,7 @@ export default function DutyDashboardScreen({
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="App Login Password"
+              placeholder="App Login Password (min 6 characters)"
               placeholderTextColor="#94A3B8"
               secureTextEntry
               value={newEmpPassword}
@@ -692,37 +998,71 @@ export default function DutyDashboardScreen({
                 onPress={handleCreateEmployee}
                 disabled={addingEmployee}
               >
-                <Text style={styles.modalSubmitText}>{addingEmployee ? 'Creating…' : 'Create Employee'}</Text>
+                {addingEmployee ? (
+                  <View style={styles.buttonRow}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.modalSubmitText}>Creating…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.modalSubmitText}>Create Employee</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Persistent Mandatory 'Allow all the time' Permission Modal */}
-      {readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION') && (
-        <View style={styles.permissionModalBackdrop}>
-          <View style={styles.permissionModalCard}>
-            <View style={styles.permIconCircle}>
-              <Text style={styles.permIcon}>📍</Text>
-            </View>
-            <Text style={styles.permTitle}>"Allow all the time" Required</Text>
-            <Text style={styles.permDescription}>
-              To accurately record your on-duty shift and GPS route, Perzent requires background location permission.
-            </Text>
-            <View style={styles.permStepBox}>
-              <Text style={styles.permStepText}>1. Tap the button below to open Permission settings.</Text>
-              <Text style={styles.permStepText}>2. Select <Text style={{ fontWeight: '800', color: '#166534' }}>"Allow all the time"</Text>.</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.permActionButton}
-              onPress={() => DeviceIntegrityService.requestAlwaysPermission()}
-            >
-              <Text style={styles.permActionText}>Grant "Allow all the time"</Text>
-            </TouchableOpacity>
+      {/* Prominent disclosure (Google Play background-location policy): shown BEFORE any permission prompt. */}
+      <Modal
+        visible={disclosureVisible}
+        animationType="slide"
+        onRequestClose={() => !requestingPermission && setDisclosureVisible(false)}
+      >
+        <ScrollView contentContainerStyle={styles.disclosurePage}>
+          <View style={styles.permIconCircle}>
+            <Text style={styles.permIcon}>📍</Text>
           </View>
-        </View>
-      )}
+          <Text style={styles.permTitle}>Location sharing while on duty</Text>
+          <Text style={styles.permDescription}>
+            Perzent collects your precise location in the background only while you are checked in to a shift.
+          </Text>
+          <View style={styles.permStepBox}>
+            <Text style={styles.permStepText}>• A persistent notification is shown the whole time location sharing is on.</Text>
+            <Text style={styles.permStepText}>• Sharing pauses when you start a break and stops when you check out.</Text>
+            <Text style={styles.permStepText}>• Your location data is sent to your employer for attendance and route records.</Text>
+            <Text style={styles.permStepText}>
+              • Android will ask you to choose <Text style={styles.permStepStrong}>"Allow all the time"</Text> so tracking keeps working when the app is in the background.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.permActionButton, requestingPermission && styles.buttonDisabled]}
+            onPress={handleDisclosureContinue}
+            disabled={requestingPermission}
+          >
+            {requestingPermission ? (
+              <View style={styles.buttonRow}>
+                <ActivityIndicator color="#FFFFFF" />
+                <Text style={styles.permActionText}>Waiting for permission…</Text>
+              </View>
+            ) : (
+              <Text style={styles.permActionText}>Continue</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.permSecondaryButton}
+            onPress={() => setDisclosureVisible(false)}
+            disabled={requestingPermission}
+          >
+            <Text style={styles.permSecondaryText}>Not now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}>
+            <Text style={styles.privacyLink}>Privacy policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.permFootnote}>
+            You can check in only after location access is set to "Allow all the time". You can still log out or use the rest of the app without it.
+          </Text>
+        </ScrollView>
+      </Modal>
     </ScrollView>
   );
 }
@@ -809,7 +1149,7 @@ const styles = StyleSheet.create({
   statusDotCompleted: { backgroundColor: '#3B82F6' },
   statusLabel: { color: '#334155', fontSize: 14, fontWeight: '800' },
   timer: { color: '#0F172A', fontSize: 38, fontWeight: '800', marginTop: 15, fontVariant: ['tabular-nums'] },
-  timerCaption: { color: '#64748B', fontSize: 12, marginTop: 5 },
+  timerCaption: { color: '#64748B', fontSize: 12, marginTop: 5, textAlign: 'center' },
   readinessCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginTop: 16 },
   readyCard: { backgroundColor: '#ECFDF5', borderColor: '#BBF7D0' },
   blockedCard: { backgroundColor: '#FFF7ED', borderColor: '#FED7AA' },
@@ -853,6 +1193,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
   buttonDisabled: { opacity: 0.6 },
+  buttonRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   actionStack: { marginTop: 18 },
   secondaryButton: {
     height: 54,
@@ -869,6 +1210,7 @@ const styles = StyleSheet.create({
   privacyNote: { marginTop: 24, paddingHorizontal: 4 },
   privacyTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   privacyText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
+  privacyLink: { color: '#166534', fontSize: 12, fontWeight: '800', marginTop: 8, textDecorationLine: 'underline' },
 
   // Team styles
   teamContainer: { marginTop: 4 },
@@ -952,6 +1294,7 @@ const styles = StyleSheet.create({
   memberName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
   memberDesignation: { fontSize: 12, color: '#64748B', marginTop: 2 },
   statusBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { fontSize: 11, fontWeight: '800', color: '#475569' },
   badgeDuty: { backgroundColor: '#DCFCE7' },
   textDuty: { color: '#166534', fontSize: 11, fontWeight: '800' },
   badgeBreak: { backgroundColor: '#FEF3C7' },
@@ -1021,22 +1364,13 @@ const styles = StyleSheet.create({
   },
   modalSubmitText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
 
-  // Permission Modal
-  permissionModalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+  // Location disclosure (full-screen, dismissible)
+  disclosurePage: {
+    flexGrow: 1,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    zIndex: 9999,
-  },
-  permissionModalCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
-    width: '100%',
-    maxWidth: 380,
-    alignItems: 'center',
+    padding: 28,
   },
   permIconCircle: {
     width: 64,
@@ -1049,21 +1383,21 @@ const styles = StyleSheet.create({
   },
   permIcon: { fontSize: 32 },
   permTitle: {
-    fontSize: 19,
+    fontSize: 21,
     fontWeight: '800',
     color: '#0F172A',
     textAlign: 'center',
     marginBottom: 8,
   },
   permDescription: {
-    fontSize: 13,
-    color: '#64748B',
+    fontSize: 14,
+    color: '#334155',
     textAlign: 'center',
-    lineHeight: 19,
+    lineHeight: 21,
     marginBottom: 16,
   },
   permStepBox: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     borderRadius: 12,
@@ -1072,11 +1406,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   permStepText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#334155',
-    lineHeight: 18,
-    marginBottom: 4,
+    lineHeight: 20,
+    marginBottom: 6,
   },
+  permStepStrong: { fontWeight: '800', color: '#166534' },
   permActionButton: {
     backgroundColor: '#16A34A',
     paddingVertical: 15,
@@ -1090,6 +1425,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  permSecondaryButton: {
+    paddingVertical: 14,
+    width: '100%',
+    alignItems: 'center',
+  },
+  permSecondaryText: { color: '#475569', fontSize: 14, fontWeight: '700' },
+  permFootnote: { color: '#94A3B8', fontSize: 11, textAlign: 'center', lineHeight: 16, marginTop: 14 },
   appVersionCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -1111,6 +1453,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
+    minWidth: 130,
+    alignItems: 'center',
   },
   checkUpdateButtonText: {
     color: '#166534',

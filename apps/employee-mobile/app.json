@@ -2,27 +2,42 @@
   "expo": {
     "name": "Perzent Field Employee",
     "slug": "perzent-employee",
-    "version": "1.1.7",
+    "version": "1.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Perzent uses your location to stamp shift check-in and check-out coordinates."
+        "NSLocationWhenInUseUsageDescription": "Perzent uses your location to stamp shift check-in and check-out coordinates.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Perzent records your location in the background only while you are checked in to a shift so your employer can see your live route."
       }
     },
     "android": {
       "package": "app.jspcoders.perzent",
-      "versionCode": 10,
+      "versionCode": 12,
+      "allowBackup": false,
       "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "POST_NOTIFICATIONS"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "Perzent records your location in the background only while you are checked in to a shift so your employer can see your live route.",
+          "locationWhenInUsePermission": "Perzent uses your location to stamp shift check-in and check-out coordinates."
+        }
+      ]
     ]
   }
 }

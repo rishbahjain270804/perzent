@@ -542,6 +542,25 @@ body {
   z-index: 3;
 }
 
+.swiggy-headlight-beam {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 24px solid color-mix(in srgb, var(--marker-color, #16a34a) 45%, transparent);
+  filter: blur(2px);
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.swiggy-accuracy-circle {
+  transition: radius 0.6s ease, opacity 0.6s ease;
+}
+
 @keyframes swiggy-radar {
   0% {
     opacity: 0.85;
@@ -639,4 +658,146 @@ body {
   .map-canvas-wrap,
   .map-canvas { min-height: 470px; }
   .map-legend { right: 0.6rem; bottom: 0.6rem; left: 0.6rem; max-width: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout helpers                                                      */
+/* ------------------------------------------------------------------ */
+.safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
+
+.dashboard-toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 4.5rem;
+  z-index: 60;
+  max-width: calc(100% - 2rem);
+  animation: map-card-arrive 180ms ease both;
+}
+@media (min-width: 768px) { .dashboard-toast { bottom: 1.25rem; } }
+
+/* Roster cards: a wrapping div with a main (pan) button and a trail button */
+.map-employee-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.map-employee-main:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 0.5rem; }
+.map-employee-trail {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  color: #64748b;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+.map-employee-trail:hover,
+.map-employee-trail:focus-visible { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; outline: none; }
+.map-employee-meta .map-fresh-pill {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.map-fresh-pill.is-live { color: #166534; background: #dcfce7; }
+.map-fresh-pill.is-stale { color: #92400e; background: #fef3c7; }
+.map-fresh-pill.is-disconnected { color: #991b1b; background: #fee2e2; }
+
+/* Live marker freshness states */
+.swiggy-marker-wrap.is-stale { opacity: 0.55; }
+.swiggy-marker-wrap.is-stale .swiggy-radar-halo,
+.swiggy-marker-wrap.is-stale .swiggy-radar-halo-2,
+.swiggy-marker-wrap.is-disconnected .swiggy-radar-halo,
+.swiggy-marker-wrap.is-disconnected .swiggy-radar-halo-2 { display: none; }
+.swiggy-marker-wrap.is-disconnected .swiggy-vehicle-disc {
+  background: linear-gradient(145deg, #94a3b8, #64748b);
+  box-shadow: 0 0 0 3px #fee2e2, 0 0 0 5px #ef4444, 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.swiggy-status-pill {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  z-index: 3;
+}
+.swiggy-status-pill.is-stale { color: #78350f; background: #fde68a; }
+.swiggy-status-pill.is-disconnected { color: #ffffff; background: #dc2626; }
+
+/* Static grey dot for checked-out / off-duty employees */
+.employee-idle-marker { background: transparent; border: 0; }
+.employee-idle-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #94a3b8;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 35%);
+}
+
+/* Route playback marker */
+.route-playback-marker { background: transparent; border: 0; }
+.route-playback-disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(145deg, #2563eb, #1e40af);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: transform 300ms ease-out;
+}
+.route-playback-disc svg { width: 14px; height: 14px; fill: currentColor; }
+
+.map-stop-marker { background: transparent; border: 0; }
+.map-stop-badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #f59e0b;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 3px 8px rgb(15 23 42 / 30%);
+  font-size: 0.6rem;
+  font-weight: 900;
+}
+
+/* Reduced motion: no halos, no flowing dashes, no marker glide */
+@media (prefers-reduced-motion: reduce) {
+  .swiggy-radar-halo,
+  .swiggy-radar-halo-2 { display: none; }
+  .live-trail-dash { animation: none; }
+  .swiggy-vehicle-disc,
+  .swiggy-vehicle-icon,
+  .route-playback-disc { transition: none; }
+  .dashboard-toast { animation: none; }
 }

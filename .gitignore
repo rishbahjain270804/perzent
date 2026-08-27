@@ -27,3 +27,8 @@ pnpm-debug.log*
 *.orig.*
 web-build/
 .vercel
+
+# Android release signing (never commit)
+*.keystore
+!debug.keystore
+keystore.properties

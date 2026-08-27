@@ -1,326 +1,237 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Receipt, Users, Shield, Smartphone, CheckCircle2, RefreshCw, UserPlus } from 'lucide-react';
+import type { PaymentTransaction } from '@perzent/shared-types';
+import { apiFetch, errorMessage, formatDate } from '@/lib/client';
 import {
-  Receipt,
-  CreditCard,
-  Building2,
-  CheckCircle2,
-  Download,
-  ShieldCheck,
-  UserPlus,
-  Search,
-  X,
-  RefreshCw,
-} from 'lucide-react';
-import {
-  EMPLOYEE_BASE_PRICE_INR,
-  GST_RATE,
-  GST_AMOUNT_INR,
-  EMPLOYEE_TOTAL_PRICE_INR,
-  PaymentTransaction,
-} from '@perzent/shared-types';
+  PageHeader,
+  StatCard,
+  StatusBadge,
+  EmptyState,
+  ErrorBanner,
+  LoadingRows,
+  useSession,
+  iconBtn,
+  btnPrimary,
+  tableHeadRow,
+  tableRow,
+} from '@/components';
 
-export default function BillingPage() {
-  const [data, setData] = useState<{
-    company_name: string;
-    summary: {
-      total_paid_seats: number;
-      total_base_billed: number;
-      total_tax_collected: number;
-      total_revenue_inr: number;
-    };
-    transactions: PaymentTransaction[];
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [filterQuery, setFilterQuery] = useState('');
-  const [selectedInvoice, setSelectedInvoice] = useState<PaymentTransaction | null>(null);
+interface StaffSummary {
+  total: number;
+  managers: number;
+  bound: number;
+}
 
-  const fetchTransactions = () => {
-    setLoading(true);
-    setError('');
-    fetch('/api/payments/transactions', { cache: 'no-store' })
-      .then(async (res) => {
-        const payload = await res.json();
-        if (!res.ok) throw new Error(payload.error || 'Could not load billing data');
-        return payload;
-      })
-      .then((resData) => {
-        setData(resData);
-        setLoading(false);
-      })
-      .catch((reason) => {
-        setError(reason instanceof Error ? reason.message : 'Could not load billing data');
-        setLoading(false);
+interface TransactionsResponse {
+  transactions: PaymentTransaction[];
+  summary?: Record<string, number>;
+}
+
+const PLAN_FEATURES = [
+  'Unlimited employees and managers',
+  'Live map, route history and dwell stops',
+  'Attendance, breaks, auto check-out and manual corrections',
+  'Timesheets with overtime and CSV export',
+  'Leave requests, reports, geofenced sites, kiosk mode',
+];
+
+function planName(tier?: string | null) {
+  if (!tier || /free|launch/i.test(tier)) return 'Free launch plan';
+  return tier.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export default function PlanPage() {
+  const { session, error: sessionError, reload: reloadSession, loading: sessionLoading } = useSession();
+  const [staff, setStaff] = useState<StaffSummary | null>(null);
+  const [staffError, setStaffError] = useState('');
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [txLoading, setTxLoading] = useState(true);
+  const [txError, setTxError] = useState('');
+
+  const loadStaff = useCallback(async () => {
+    try {
+      const rows = await apiFetch<Array<{ role: string; status: string; is_device_bound?: boolean }>>('/api/employees');
+      const list = Array.isArray(rows) ? rows : [];
+      setStaff({
+        total: list.filter((r) => r.status !== 'TERMINATED').length,
+        managers: list.filter((r) => r.role === 'MANAGER' && r.status !== 'TERMINATED').length,
+        bound: list.filter((r) => r.is_device_bound).length,
       });
-  };
-
-  useEffect(() => {
-    fetchTransactions();
+      setStaffError('');
+    } catch (reason) {
+      setStaffError(errorMessage(reason, 'Could not load staff usage.'));
+    }
   }, []);
 
-  const summary = data?.summary || {
-    total_paid_seats: 0,
-    total_base_billed: 0,
-    total_tax_collected: 0,
-    total_revenue_inr: 0,
-  };
+  const loadTransactions = useCallback(async () => {
+    setTxLoading(true);
+    try {
+      const data = await apiFetch<TransactionsResponse>('/api/payments/transactions');
+      setTransactions(Array.isArray(data?.transactions) ? data.transactions : []);
+      setTxError('');
+    } catch (reason) {
+      setTxError(errorMessage(reason, 'Could not load the transaction ledger.'));
+    } finally {
+      setTxLoading(false);
+    }
+  }, []);
 
-  const filteredTransactions =
-    data?.transactions?.filter(
-      (t) =>
-        t.employee_name?.toLowerCase().includes(filterQuery.toLowerCase()) ||
-        t.invoice_number?.toLowerCase().includes(filterQuery.toLowerCase()) ||
-        t.order_id?.toLowerCase().includes(filterQuery.toLowerCase())
-    ) || [];
+  useEffect(() => {
+    loadStaff();
+    loadTransactions();
+  }, [loadStaff, loadTransactions]);
+
+  const tier = session?.company?.plan_tier;
+  const amount = (value?: number | null) => (typeof value === 'number' ? `₹${value.toFixed(2)}` : '—');
 
   return (
-    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto pb-16 md:pb-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h1 className="text-sm md:text-base font-bold dashboard-strong tracking-tight">Billing & Tax Ledger</h1>
-          <p className="text-[10px] md:text-[11px] text-[#6B7280]">
-            Cashfree PG • ₹{EMPLOYEE_BASE_PRICE_INR.toFixed(2)} + 18% GST (₹{GST_AMOUNT_INR.toFixed(2)}) = ₹{EMPLOYEE_TOTAL_PRICE_INR.toFixed(2)} / seat
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 self-start sm:self-auto">
-          <button
-            onClick={fetchTransactions}
-            className="p-1.5 rounded border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white transition"
-            title="Refresh Invoices"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-          <Link
-            href="/dashboard/employees"
-            className="px-2.5 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white font-medium text-xs flex items-center gap-1.5 transition"
-          >
-            <UserPlus className="w-3.5 h-3.5" /> Add Seat (₹116.82)
-          </Link>
-        </div>
-      </div>
+    <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
+      <PageHeader
+        title="Plan & usage"
+        description="Your workspace is on the free launch plan. Billing is informational only — nothing is charged."
+        actions={
+          <>
+            <button
+              onClick={() => {
+                loadStaff();
+                loadTransactions();
+              }}
+              disabled={txLoading}
+              className={iconBtn}
+              title="Refresh"
+              aria-label="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${txLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <Link href="/dashboard/employees" className={btnPrimary}>
+              <UserPlus className="w-3.5 h-3.5" /> Add employee (free)
+            </Link>
+          </>
+        }
+      />
 
-      {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={sessionError} onRetry={reloadSession} retrying={sessionLoading} />
+      <ErrorBanner message={staffError} onRetry={loadStaff} />
 
-      {/* 4-Cell Metric Summary Grid (2 cols mobile, 4 desktop) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-[#6B7280] text-[10px] uppercase font-semibold">Paid Seats</span>
-          <p className="text-lg md:text-xl font-bold dashboard-strong mt-0.5 tabular-nums">
-            {summary.total_paid_seats}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">Active licenses</span>
-        </div>
-
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-emerald-400 text-[10px] uppercase font-semibold">Net Base Billed</span>
-          <p className="text-lg md:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums">
-            ₹{summary.total_base_billed.toFixed(2)}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">₹99.00 / seat fee</span>
-        </div>
-
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-amber-400 text-[10px] uppercase font-semibold">18% GST</span>
-          <p className="text-lg md:text-xl font-bold text-amber-400 mt-0.5 tabular-nums">
-            ₹{summary.total_tax_collected.toFixed(2)}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">GSTIN compliant</span>
-        </div>
-
-        <div className="dashboard-card p-3 rounded-lg">
-          <span className="text-emerald-400 text-[10px] uppercase font-semibold">Gross Volume</span>
-          <p className="text-lg md:text-xl font-bold text-emerald-400 mt-0.5 tabular-nums">
-            ₹{summary.total_revenue_inr.toFixed(2)}
-          </p>
-          <span className="text-[10px] text-[#6B7280]">Cashfree settled</span>
-        </div>
-      </div>
-
-      {/* Search & Filter Bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
-          <input
-            type="text"
-            value={filterQuery}
-            onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder="Search invoice or rep name..."
-            className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-700 bg-[#0B1120] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A]"
-          />
-        </div>
-        <span className="text-[10px] md:text-[11px] text-[#6B7280]">{filteredTransactions.length} invoices</span>
-      </div>
-
-      {/* ─── Mobile Card List ─── */}
-      <div className="md:hidden space-y-2">
-        {filteredTransactions.map((t) => (
-          <div key={t.id} className="dashboard-card rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="font-mono font-bold text-xs dashboard-strong">{t.invoice_number || 'INV-PENDING'}</span>
-                <p className="text-[10px] text-[#6B7280]">{new Date(t.paid_at || t.created_at).toLocaleDateString()}</p>
-              </div>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> ₹{t.total_amount?.toFixed(2)}
-              </span>
+      {/* Plan card */}
+      <div className="dashboard-card rounded-lg p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-sm dashboard-strong">{planName(tier)}</h2>
+              <StatusBadge status="ACTIVE" label="Current" />
             </div>
-
-            <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-xs">
-              <div>
-                <p className="font-semibold dashboard-strong">{t.employee_name}</p>
-                <p className="text-[10px] text-[#6B7280]">{t.employee_designation} • {t.employee_phone}</p>
-              </div>
-              <button
-                onClick={() => setSelectedInvoice(t)}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium transition inline-flex items-center gap-1 shrink-0"
-              >
-                <Download className="w-3 h-3" /> View
-              </button>
-            </div>
+            <p className="text-[11px] text-[#6B7280] mt-0.5">
+              Unlimited seats, all features included. {session?.company?.name ? `Workspace: ${session.company.name}.` : ''}
+            </p>
           </div>
-        ))}
-        {filteredTransactions.length === 0 && !loading && (
-          <p className="text-center text-[#6B7280] text-[11px] py-8">No invoice records found.</p>
+          <div className="text-right">
+            <p className="text-xl font-bold dashboard-strong tabular-nums">₹0<span className="text-xs font-normal text-[#6B7280]"> / month</span></p>
+            <p className="text-[10px] text-[#6B7280]">No card on file</p>
+          </div>
+        </div>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300">
+          {PLAN_FEATURES.map((feature) => (
+            <li key={feature} className="flex items-start gap-1.5">
+              <CheckCircle2 className="w-3 h-3 text-[#16A34A] shrink-0 mt-0.5" /> {feature}
+            </li>
+          ))}
+        </ul>
+        <p className="text-[10px] text-[#6B7280]">
+          If paid plans are introduced later you will be told in advance; nothing changes automatically.
+        </p>
+      </div>
+
+      {/* Usage */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <StatCard label="Staff" value={staff ? staff.total : '—'} icon={Users} hint="Unlimited on this plan" />
+        <StatCard label="Managers" value={staff ? staff.managers : '—'} icon={Shield} tone="info" />
+        <StatCard label="Devices bound" value={staff ? staff.bound : '—'} icon={Smartphone} tone="success" />
+        <StatCard label="Amount due" value="₹0.00" icon={Receipt} hint="Free launch plan" />
+      </div>
+
+      {/* Ledger */}
+      <div className="dashboard-card rounded-lg overflow-hidden">
+        <div className="px-3 py-2 border-b border-slate-800/60 flex items-center justify-between">
+          <span className="font-semibold text-xs dashboard-strong">Transaction ledger</span>
+          <span className="text-[11px] text-[#6B7280]">{transactions.length} record{transactions.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="p-3 pb-0">
+          <ErrorBanner message={txError} onRetry={loadTransactions} retrying={txLoading} />
+        </div>
+        {txLoading ? (
+          <LoadingRows rows={3} />
+        ) : transactions.length === 0 ? (
+          !txError && (
+            <EmptyState
+              icon={Receipt}
+              title="No transactions"
+              description="The launch plan is free, so there is nothing to bill. Any historical payments would appear here."
+            />
+          )
+        ) : (
+          <>
+            {/* Mobile */}
+            <div className="md:hidden divide-y divide-slate-800/40">
+              {transactions.map((t) => (
+                <div key={t.id} className="p-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono font-bold text-xs dashboard-strong">{t.invoice_number || t.order_id}</span>
+                    <StatusBadge status={t.status} />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-300">{t.employee_name || '—'}</span>
+                    <span className="font-mono dashboard-strong">{amount(t.total_amount)}</span>
+                  </div>
+                  <p className="text-[10px] text-[#6B7280]">
+                    {formatDate(t.paid_at || t.created_at)} · {t.payment_method || 'Method not recorded'}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {/* Desktop */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className={tableHeadRow}>
+                    <th className="px-3 py-2">Invoice / order</th>
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Employee</th>
+                    <th className="px-3 py-2">Base</th>
+                    <th className="px-3 py-2">Tax</th>
+                    <th className="px-3 py-2">Total</th>
+                    <th className="px-3 py-2">Method</th>
+                    <th className="px-3 py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {transactions.map((t) => (
+                    <tr key={t.id} className={tableRow}>
+                      <td className="px-3 py-2 font-mono dashboard-strong">
+                        <p className="font-bold leading-tight">{t.invoice_number || '—'}</p>
+                        <p className="text-[10px] text-[#6B7280] leading-tight truncate max-w-[180px]">{t.order_id}</p>
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 text-[11px]">{formatDate(t.paid_at || t.created_at)}</td>
+                      <td className="px-3 py-2">
+                        <p className="font-semibold dashboard-strong leading-tight">{t.employee_name || '—'}</p>
+                        <p className="text-[10px] text-[#6B7280] leading-tight">{[t.employee_designation, t.employee_phone].filter(Boolean).join(' · ')}</p>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-slate-300">{amount(t.base_price)}</td>
+                      <td className="px-3 py-2 font-mono text-slate-300">{amount(t.tax_amount)}</td>
+                      <td className="px-3 py-2 font-mono font-bold dashboard-strong">{amount(t.total_amount)}</td>
+                      <td className="px-3 py-2 text-[11px] text-slate-300">{t.payment_method || <span className="text-slate-500">—</span>}</td>
+                      <td className="px-3 py-2"><StatusBadge status={t.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
-
-      {/* ─── Desktop Table ─── */}
-      <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[#6B7280] font-semibold text-[10px] uppercase tracking-wider">
-                <th className="px-3 py-2">Invoice #</th>
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Employee Provisioned</th>
-                <th className="px-3 py-2">Base (₹)</th>
-                <th className="px-3 py-2">18% GST</th>
-                <th className="px-3 py-2">Total Paid</th>
-                <th className="px-3 py-2">Method</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2 text-right">Receipt</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/40">
-              {filteredTransactions.map((t) => (
-                <tr key={t.id} className="hover:bg-slate-800/20 transition">
-                  <td className="px-3 py-2 font-mono font-bold dashboard-strong">
-                    {t.invoice_number || 'INV-PENDING'}
-                  </td>
-                  <td className="px-3 py-2 text-slate-400 text-[11px]">
-                    {new Date(t.paid_at || t.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2">
-                    <p className="font-semibold dashboard-strong leading-tight">{t.employee_name}</p>
-                    <p className="text-[10px] text-[#6B7280] leading-tight">{t.employee_designation} • {t.employee_phone}</p>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-slate-300">₹{t.base_price?.toFixed(2)}</td>
-                  <td className="px-3 py-2 font-mono text-emerald-400">+₹{t.tax_amount?.toFixed(2)}</td>
-                  <td className="px-3 py-2 font-mono font-bold dashboard-strong">₹{t.total_amount?.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-[11px] text-slate-300">{t.payment_method || 'UPI'}</td>
-                  <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#16A34A]/15 text-[#86EFAC] border border-[#16A34A]/30">
-                      <CheckCircle2 className="w-2.5 h-2.5 text-[#16A34A]" /> Paid
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      onClick={() => setSelectedInvoice(t)}
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium transition inline-flex items-center gap-1"
-                    >
-                      <Download className="w-3 h-3" /> View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Minimalist Flat Invoice Modal */}
-      {selectedInvoice && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 z-50">
-          <div className="max-w-md w-full dashboard-card rounded-lg p-4 sm:p-5 shadow-2xl space-y-3 text-xs">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-[#16A34A] text-white font-bold flex items-center justify-center text-xs">
-                  P
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm dashboard-strong">Tax Invoice</h3>
-                  <p className="text-[10px] text-[#6B7280]">Perzent Workforce Platform</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedInvoice(null)}
-                className="p-1 rounded text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-1.5 p-2.5 rounded border border-slate-800 bg-slate-900/60 font-mono text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Invoice Number:</span>
-                <span className="font-bold dashboard-strong">{selectedInvoice.invoice_number}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Date:</span>
-                <span className="text-slate-200">{new Date(selectedInvoice.paid_at || selectedInvoice.created_at).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Order ID:</span>
-                <span className="text-slate-300 truncate max-w-[180px]">{selectedInvoice.order_id}</span>
-              </div>
-            </div>
-
-            <div className="space-y-1 pt-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Item:</span>
-                <span className="dashboard-strong">Field Rep License ({selectedInvoice.employee_name})</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Base Seat Fee:</span>
-                <span>₹{selectedInvoice.base_price?.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">18% GST:</span>
-                <span className="text-emerald-400">+₹{selectedInvoice.tax_amount?.toFixed(2)}</span>
-              </div>
-              <div className="pt-1.5 border-t border-slate-800 flex justify-between font-bold text-sm">
-                <span>Total Paid:</span>
-                <span className="text-emerald-400">₹{selectedInvoice.total_amount?.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-800 flex justify-end gap-2">
-              <button
-                onClick={() => setSelectedInvoice(null)}
-                className="px-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-slate-300 text-xs font-medium"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  alert(`Invoice ${selectedInvoice.invoice_number} downloaded.`);
-                  setSelectedInvoice(null);
-                }}
-                className="px-3 py-1.5 rounded bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-medium flex items-center gap-1.5"
-              >
-                <Download className="w-3.5 h-3.5" /> Download PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

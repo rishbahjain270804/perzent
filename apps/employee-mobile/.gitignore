@@ -1,0 +1,9 @@
+# Android release signing secrets (never commit)
+android/keystore.properties
+android/app/*.keystore
+!android/app/debug.keystore
+android/app/*.jks
+
+# Local build output
+dist/
+.expo/
