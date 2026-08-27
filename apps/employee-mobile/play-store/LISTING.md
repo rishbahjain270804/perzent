@@ -11,7 +11,7 @@ Files:
 | `perzent-1.2.0-12.aab` (git-ignored, copy from `android/app/build/outputs/bundle/release/`) | Release → App bundle | signed with the upload key `perzent` |
 | `graphics/app-icon-512.png` | Store listing → App icon | 512×512 PNG |
 | `graphics/feature-graphic-1024x500.png` | Store listing → Feature graphic | 1024×500 PNG |
-| `graphics/screenshots/01-login.png … 04-help.png` | Store listing → Phone screenshots | 1080×2340 PNG, 9:19.5 (2–8 required) |
+| `graphics/screenshots/01-check-in.png … 05-help.png` | Store listing → Phone screenshots | 1080×1920 PNG, 9:16 (2–8 required) — styled cards rendered by `scripts/generate-store-cards.js` from the raw captures in `graphics/raw/` |
 
 ---
 
@@ -89,8 +89,10 @@ First public release.
 
 - App icon: `graphics/app-icon-512.png`
 - Feature graphic: `graphics/feature-graphic-1024x500.png`
-- Phone screenshots (upload in this order): `graphics/screenshots/01-login.png`, `02-on-duty.png`,
-  `03-shift-completed.png`, `04-help.png`
+- Phone screenshots (upload in this order): `graphics/screenshots/01-check-in.png`,
+  `02-live-location.png`, `03-auto-checkout.png`, `04-sign-in.png`, `05-help.png`.
+  To re-render after UI changes: drop new 1080×2340 captures into `graphics/raw/` (same file
+  names) and run `PLAYWRIGHT_MODULE=<playwright> node scripts/generate-store-cards.js`
 - 7-inch / 10-inch tablet screenshots: not required (the app is phone-only; leave empty or reuse
   the phone shots).
 - Promo video: optional. The **background-location demo video is separate** (section 6).
