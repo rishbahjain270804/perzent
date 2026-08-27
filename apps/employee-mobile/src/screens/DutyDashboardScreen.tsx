@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Alert,
   AppState,
   Linking,
@@ -642,7 +643,7 @@ export default function DutyDashboardScreen({
       }
     >
       <View style={styles.header}>
-        <View style={styles.brandMark}><Text style={styles.brandLetter}>P</Text></View>
+        <Image source={require('../../assets/logo-mark.png')} style={styles.brandMark} resizeMode="contain" accessibilityLabel="Perzent" />
         <View style={styles.identity}>
           <Text style={styles.greeting}>Hello,</Text>
           <Text style={styles.name}>{session.full_name}</Text>
@@ -1078,14 +1079,7 @@ export default function DutyDashboardScreen({
 const styles = StyleSheet.create({
   page: { flexGrow: 1, backgroundColor: '#F8FAFC', padding: 20, paddingBottom: 40 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
-  brandMark: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
-    backgroundColor: '#16A34A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  brandMark: { width: 46, height: 46, borderRadius: 13 },
   brandLetter: { color: '#FFFFFF', fontSize: 24, fontWeight: '800' },
   identity: { flex: 1, marginLeft: 12 },
   greeting: { color: '#64748B', fontSize: 12 },

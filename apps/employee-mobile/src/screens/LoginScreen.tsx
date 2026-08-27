@@ -50,10 +50,8 @@ export default function LoginScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <View style={styles.brandMark}>
-          <Text style={styles.brandLetter}>P</Text>
-        </View>
-        <Text style={styles.title}>Welcome to Perzent</Text>
+        <Image source={require('../../assets/perzent-lockup.png')} style={styles.lockup} resizeMode="contain" accessibilityLabel="Perzent" />
+        <Text style={styles.title}>Welcome</Text>
         <Text style={styles.subtitle}>Sign in to start or manage your work shift.</Text>
 
         <View style={styles.formCard}>
@@ -125,6 +123,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   brandLetter: { color: '#FFFFFF', fontSize: 30, fontWeight: '800' },
+  lockup: { width: 240, height: 72, alignSelf: 'center', marginBottom: 16 },
   title: { color: '#0F172A', fontSize: 27, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: '#64748B', fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 28 },
   formCard: {
