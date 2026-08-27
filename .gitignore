@@ -32,3 +32,6 @@ web-build/
 *.keystore
 !debug.keystore
 keystore.properties
+
+# Play Store bundles are build outputs
+apps/employee-mobile/play-store/*.aab
