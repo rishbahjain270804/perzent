@@ -4,6 +4,12 @@
   "outputDirectory": "apps/admin-portal/.next",
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/cron/policies", "schedule": "45 18 * * *" }
+    {
+      "path": "/api/cron/policies",
+      "schedule": "45 18 * * *"
+    }
+  ],
+  "regions": [
+    "bom1"
   ]
 }

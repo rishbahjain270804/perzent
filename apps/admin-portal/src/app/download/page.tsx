@@ -18,11 +18,12 @@ interface VersionInfo {
 
 const APK_PATH = '/api/download/apk';
 
-function absoluteUrl(path: string | null | undefined) {
+function absoluteUrl(origin: string, path: string | null | undefined) {
   const value = path && path.trim() ? path.trim() : APK_PATH;
   if (/^https?:\/\//i.test(value)) return value;
-  if (typeof window === 'undefined') return value;
-  return `${window.location.origin}${value.startsWith('/') ? '' : '/'}${value}`;
+  // `origin` is empty during SSR and the first client render so both agree; it is filled after mount.
+  if (!origin) return value;
+  return `${origin}${value.startsWith('/') ? '' : '/'}${value}`;
 }
 
 export default function DownloadPage() {
@@ -33,9 +34,10 @@ export default function DownloadPage() {
   const [versionLoading, setVersionLoading] = useState(true);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [qrError, setQrError] = useState('');
+  const [origin, setOrigin] = useState('');
 
   const apkAvailable = apkStatus === 'available';
-  const downloadUrl = absoluteUrl(version?.download_url);
+  const downloadUrl = absoluteUrl(origin, version?.download_url);
   const playStoreUrl = version?.play_store_url?.trim() || '';
 
   const loadVersion = () => {
@@ -50,6 +52,7 @@ export default function DownloadPage() {
   };
 
   useEffect(() => {
+    setOrigin(window.location.origin);
     fetch(APK_PATH, { method: 'HEAD', cache: 'no-store' })
       .then((response) => setApkStatus(response.ok ? 'available' : 'missing'))
       .catch(() => setApkStatus('missing'));
