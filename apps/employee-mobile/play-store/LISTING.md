@@ -158,19 +158,12 @@ is **not** transferred to any other third party.
 
 Choose **All or some functionality is restricted** → *Add new instructions*:
 
+- Name: `Reviewer employee login`
+- Username: `+919000000001` · Password: `review2026`
+- "Any other information" (console limit **500 characters**; this is 492):
+
 ```
-Name: Reviewer employee login
-Username / phone: +919000000001
-Password: review2026
-
-Perzent is a workforce app; accounts are created by an employer, so please use the test account above (company "Smoke Test 27762"). Steps:
-1. Open the app and sign in with the phone number and password above.
-2. The app shows a full-screen disclosure "Location sharing while on duty". Tap Continue, then choose "While using the app" and, on the second prompt (or in Settings), "Allow all the time". Allow notifications.
-3. Tap "Check in". A persistent "Perzent – On duty" notification appears and location is shared with the test employer only until you tap "Check out".
-4. Optional: tap "Start break" (tracking pauses, notification disappears) and "Resume shift".
-5. Tap "Check out" to stop all location collection.
-
-Owner web portal (to see the live map for the same test company): https://perzent.jspcoders.app/login — smoke27762@example.com / smoketest123.
+Accounts are created by an employer, so use the test employee above (company "Smoke Test 27762"). Sign in with the phone number and password. A location disclosure appears: tap Continue, choose "While using the app", then "Allow all the time". Tap Check in to start a shift (a persistent notification appears); Start break pauses tracking; Check out stops it. The account binds to the first phone used. Owner portal: https://perzent.jspcoders.app/login - smoke27762@example.com / smoketest123
 ```
 
 Note: the account is bound to the first phone that signs in. If the reviewer needs to switch
