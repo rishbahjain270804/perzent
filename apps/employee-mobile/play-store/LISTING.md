@@ -187,7 +187,7 @@ fresh account.
   *Continue* / *Not now*). Only after *Continue* is the system prompt shown.
 - Privacy policy: `https://perzent.jspcoders.app/privacy` (sections "Location while on duty",
   "Retention", "Your rights").
-- **Video (required)** — record the phone screen (Android screen recorder is fine), 1–3 minutes,
+- **Video** — recorded 2026-08-30 as `play-store/demo-background-location.mp4` (139 s, git-ignored; driver: `scripts/record-play-demo.sh`, demo account `+919000000003` / `demo2026`). Upload it to YouTube as *Unlisted* and paste the link. If it ever needs re-recording, record the phone screen (Android screen recorder is fine), 1–3 minutes,
   and upload to YouTube as *Unlisted*; paste the link. Show in this order:
   1. Cold start → sign in with the reviewer account.
   2. The in-app disclosure screen, held long enough to read.

@@ -35,3 +35,4 @@ keystore.properties
 
 # Play Store bundles are build outputs
 apps/employee-mobile/play-store/*.aab
+apps/employee-mobile/play-store/*.mp4
