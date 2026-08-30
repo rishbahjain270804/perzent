@@ -124,7 +124,7 @@ export default function RegisterPage() {
                 autoComplete="tel"
                 value={formData.phone}
                 onChange={update('phone')}
-                placeholder="9876543210"
+                placeholder="+91 98765 43210 (with country code)"
                 minLength={10}
                 className={fieldClass}
               />

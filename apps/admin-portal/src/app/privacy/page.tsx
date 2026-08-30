@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'How the Perzent Field Employee Android app and the Perzent web portal collect, use, store and share personal data, including background location during shifts.',
 };
 
-const EFFECTIVE_DATE = '27 August 2026';
+const EFFECTIVE_DATE = '30 August 2026';
 const SUPPORT_EMAIL = BRAND.supportEmail;
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
@@ -28,6 +28,7 @@ const TOC = [
   ['retention', 'How long we keep it'],
   ['sharing', 'Who we share it with'],
   ['security', 'How we protect it'],
+  ['international', 'International use and where data is stored'],
   ['rights', 'Your rights'],
   ['children', 'Children'],
   ['changes', 'Changes to this policy'],
@@ -180,7 +181,20 @@ export default function PrivacyPolicyPage() {
           </ul>
         </Section>
 
-        <Section id="rights" title="8. Your rights">
+        <Section id="international" title="8. International use and where data is stored">
+          <p>
+            Perzent is available worldwide. Your data is stored on servers in <strong>India</strong> (Supabase, Mumbai region) and processed by our
+            application hosting provider (Vercel), which may route requests through data centres in other countries. If you use Perzent from
+            outside India, your data is therefore transferred to India.
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong>EU / EEA, UK and Switzerland (GDPR / UK GDPR):</strong> your employer is the <em>controller</em> and JSP Coders is a <em>processor</em> acting on its documented instructions. Transfers to India rely on the standard contractual clauses in our processing terms with employers and on the safeguards described in section 7. You have the rights listed in section 9 and may lodge a complaint with your local data protection authority.</li>
+            <li><strong>Other countries:</strong> your employer remains responsible for ensuring that shift-time location tracking is lawful in your jurisdiction and for giving you any notice required locally. We apply this policy to every user regardless of location.</li>
+            <li><strong>Language:</strong> the app and this policy are provided in English. If a translation is ever provided, the English version prevails.</li>
+          </ul>
+        </Section>
+
+        <Section id="rights" title="9. Your rights">
           <p>
             Depending on where you live you may have the right to access, correct, delete or restrict the use of your personal data, and to object
             to processing. Because your employer is the controller:
@@ -194,21 +208,21 @@ export default function PrivacyPolicyPage() {
           <p>You can stop location collection at any time by checking out, or by revoking the location permission in Android settings.</p>
         </Section>
 
-        <Section id="children" title="9. Children">
+        <Section id="children" title="10. Children">
           <p>
             Perzent is a workplace tool for employees and is <strong>not intended for anyone under 18</strong>. Employers must not create accounts
             for minors. If we learn that we hold data about a person under 18 we will delete it.
           </p>
         </Section>
 
-        <Section id="changes" title="10. Changes to this policy">
+        <Section id="changes" title="11. Changes to this policy">
           <p>
             We may update this policy when the app or the law changes. The effective date at the top will change, and material changes will be
             announced in the app or the portal. Continued use after a change means the updated policy applies.
           </p>
         </Section>
 
-        <Section id="contact" title="11. Contact">
+        <Section id="contact" title="12. Contact">
           <p>
             Operator: <strong>JSP Coders</strong> (Perzent).<br />
             Email: <a href={`mailto:${SUPPORT_EMAIL}`} className="text-[#16A34A] underline">{SUPPORT_EMAIL}</a>

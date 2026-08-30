@@ -77,7 +77,7 @@ function LoginForm() {
               autoComplete="username"
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
-              placeholder="9876543210 or you@company.com"
+              placeholder="+91 98765 43210 or you@company.com"
               className="w-full pl-8 pr-3 py-1.5 rounded border border-slate-800 bg-slate-900 text-white placeholder-slate-500 focus:outline-none focus:border-[#16A34A] text-xs"
             />
           </div>
