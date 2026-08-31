@@ -26,7 +26,7 @@ import { ReminderService } from '../services/ReminderService';
 import { BRAND } from '@perzent/shared-types';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
-type ManagerTab = 'DUTY' | 'TEAM';
+type ManagerTab = 'DUTY' | 'TEAM' | 'LEAVE';
 type PendingAction = 'CHECK_IN' | 'START_BREAK' | 'RESUME' | 'CHECK_OUT' | null;
 type ShiftPolicy = { timezone: string; auto_checkout_time: string; max_break_minutes: number };
 
@@ -119,6 +119,18 @@ export default function DutyDashboardScreen({
   const [newEmpDesignation, setNewEmpDesignation] = useState('');
   const [addingEmployee, setAddingEmployee] = useState(false);
   const [resettingMemberId, setResettingMemberId] = useState<string | null>(null);
+
+  // Employee Leave States
+  const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
+  const [leaveBalances, setLeaveBalances] = useState<{ paid: number; sick: number; casual: number }>({ paid: 0, sick: 0, casual: 0 });
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveModalVisible, setLeaveModalVisible] = useState(false);
+  const [leaveType, setLeaveType] = useState<'PAID' | 'SICK' | 'CASUAL' | 'UNPAID'>('PAID');
+  const [leaveStartDate, setLeaveStartDate] = useState('');
+  const [leaveEndDate, setLeaveEndDate] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [sendingSos, setSendingSos] = useState(false);
 
   const shiftStatusRef = useRef<ShiftStatus>('CHECKED_OUT');
   const serverOffsetRef = useRef(0);
@@ -673,6 +685,80 @@ export default function DutyDashboardScreen({
     );
   };
 
+  const loadLeaves = useCallback(async () => {
+    setLeaveLoading(true);
+    try {
+      const data = await EmployeeApi.getLeaves(session);
+      if (data?.balances) setLeaveBalances(data.balances);
+      if (Array.isArray(data?.requests)) setLeaveRequests(data.requests);
+    } catch (error) {
+      showActionError('Leave Fetch Error', error);
+    } finally {
+      setLeaveLoading(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (activeTab === 'LEAVE') {
+      loadLeaves();
+    }
+  }, [activeTab, loadLeaves]);
+
+  const handleCreateLeave = async () => {
+    if (!leaveStartDate || !leaveEndDate || !leaveReason.trim()) {
+      Alert.alert('Validation Error', 'Please enter start date, end date, and a reason.');
+      return;
+    }
+    setSubmittingLeave(true);
+    try {
+      await EmployeeApi.requestLeave(session, {
+        leave_type: leaveType,
+        start_date: leaveStartDate.trim(),
+        end_date: leaveEndDate.trim(),
+        reason: leaveReason.trim(),
+      });
+      Alert.alert('Leave Submitted', 'Your leave request has been submitted for approval.');
+      setLeaveModalVisible(false);
+      setLeaveStartDate('');
+      setLeaveEndDate('');
+      setLeaveReason('');
+      loadLeaves();
+    } catch (error) {
+      showActionError('Leave Request Error', error);
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
+
+  const handleTriggerSos = () => {
+    Alert.alert(
+      '🚨 EMERGENCY SOS ALERT',
+      'Are you in immediate danger or need urgent help? This will instantly broadcast your exact GPS location to your employer and manager.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'SEND SOS NOW',
+          style: 'destructive',
+          onPress: async () => {
+            setSendingSos(true);
+            try {
+              const pos = await EmployeeApi.getDevicePosition();
+              await EmployeeApi.triggerSos(session, pos, 'EMERGENCY SOS DISPATCH FROM APP');
+              Alert.alert(
+                '🚨 SOS ALERT SENT',
+                'Your employer and manager have been notified with your live GPS location. Stay calm.'
+              );
+            } catch (error) {
+              showActionError('SOS Dispatch Failed', error);
+            } finally {
+              setSendingSos(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const statusLabel = shiftStatus === 'CHECKED_IN'
     ? 'On duty'
     : shiftStatus === 'ON_BREAK'
@@ -711,33 +797,57 @@ export default function DutyDashboardScreen({
             <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
-          <Text style={styles.logoutText}>Log out</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            onPress={handleTriggerSos}
+            style={{
+              backgroundColor: '#DC2626',
+              paddingVertical: 7,
+              paddingHorizontal: 12,
+              borderRadius: 8,
+            }}
+            disabled={sendingSos}
+          >
+            {sendingSos ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '900' }}>🚨 SOS</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
+            <Text style={styles.logoutText}>Log out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Manager Tab Switcher */}
-      {isManager && (
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'DUTY' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('DUTY')}
-          >
-            <Text style={[styles.tabText, activeTab === 'DUTY' && styles.tabTextActive]}>My Shift Duty</Text>
-          </TouchableOpacity>
+      {/* Tab Switcher */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'DUTY' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('DUTY')}
+        >
+          <Text style={[styles.tabText, activeTab === 'DUTY' && styles.tabTextActive]}>My Shift</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'LEAVE' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('LEAVE')}
+        >
+          <Text style={[styles.tabText, activeTab === 'LEAVE' && styles.tabTextActive]}>My Leaves</Text>
+        </TouchableOpacity>
+        {isManager && (
           <TouchableOpacity
             style={[styles.tabButton, activeTab === 'TEAM' && styles.tabButtonActive]}
             onPress={() => setActiveTab('TEAM')}
           >
             <Text style={[styles.tabText, activeTab === 'TEAM' && styles.tabTextActive]}>
-              My Team ({teamMembers.length})
+              Team ({teamMembers.length})
             </Text>
           </TouchableOpacity>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* --- TAB 1: MY DUTY & SHIFT --- */}
-      {(!isManager || activeTab === 'DUTY') && (
+      {activeTab === 'DUTY' && (
         <View>
           {/* 2-Minute GPS / Mobile Internet Stalled Warning */}
           {isGpsStalled && (
@@ -1056,6 +1166,170 @@ export default function DutyDashboardScreen({
           )}
         </View>
       )}
+
+      {/* --- TAB 3: MY LEAVES --- */}
+      {activeTab === 'LEAVE' && (
+        <View style={styles.teamContainer}>
+          <TouchableOpacity style={styles.addEmployeeTopButton} onPress={() => setLeaveModalVisible(true)}>
+            <Text style={styles.addEmployeeTopButtonText}>+ Apply for Leave</Text>
+          </TouchableOpacity>
+
+          {/* Leave Balances Card */}
+          <View style={styles.historyCard}>
+            <Text style={styles.historyTitle}>Leave Balances</Text>
+            <View style={styles.historyRow}>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{leaveBalances.paid}d</Text>
+                <Text style={styles.historyLabel}>Paid</Text>
+              </View>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{leaveBalances.sick}d</Text>
+                <Text style={styles.historyLabel}>Sick</Text>
+              </View>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{leaveBalances.casual}d</Text>
+                <Text style={styles.historyLabel}>Casual</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Recent Leave Requests */}
+          <View style={[styles.historyCard, { marginTop: 14 }]}>
+            <Text style={styles.historyTitle}>Leave History</Text>
+            {leaveLoading ? (
+              <ActivityIndicator size="small" color="#16A34A" style={{ marginVertical: 12 }} />
+            ) : leaveRequests.length === 0 ? (
+              <Text style={styles.historyNote}>No leave requests submitted yet.</Text>
+            ) : (
+              leaveRequests.map((req) => (
+                <View key={req.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '800', color: '#0F172A', fontSize: 13 }}>
+                      {req.leave_type} LEAVE ({req.total_days} day{req.total_days > 1 ? 's' : ''})
+                    </Text>
+                    <View
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 6,
+                        backgroundColor:
+                          req.status === 'APPROVED'
+                            ? '#DCFCE7'
+                            : req.status === 'REJECTED'
+                              ? '#FEE2E2'
+                              : '#FEF3C7',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: '800',
+                          color:
+                            req.status === 'APPROVED'
+                              ? '#166534'
+                              : req.status === 'REJECTED'
+                                ? '#991B1B'
+                                : '#92400E',
+                        }}
+                      >
+                        {req.status}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>
+                    Dates: {String(req.start_date).slice(0, 10)} to {String(req.end_date).slice(0, 10)}
+                  </Text>
+                  {req.reason ? <Text style={{ color: '#334155', fontSize: 12, marginTop: 4 }}>Reason: {req.reason}</Text> : null}
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* Modal: Request Leave */}
+      <Modal
+        visible={leaveModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !submittingLeave && setLeaveModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Request Leave</Text>
+            <Text style={styles.modalSubtitle}>Submit a leave request to your manager</Text>
+
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+              {(['PAID', 'SICK', 'CASUAL', 'UNPAID'] as const).map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setLeaveType(t)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: leaveType === t ? '#16A34A' : '#CBD5E1',
+                    backgroundColor: leaveType === t ? '#F0FDF4' : '#FFFFFF',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: leaveType === t ? '#15803D' : '#475569' }}>
+                    {t}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Start Date (YYYY-MM-DD)"
+              placeholderTextColor="#94A3B8"
+              value={leaveStartDate}
+              onChangeText={setLeaveStartDate}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="End Date (YYYY-MM-DD)"
+              placeholderTextColor="#94A3B8"
+              value={leaveEndDate}
+              onChangeText={setLeaveEndDate}
+            />
+            <TextInput
+              style={[styles.modalInput, { height: 70, textAlignVertical: 'top' }]}
+              placeholder="Reason for leave"
+              placeholderTextColor="#94A3B8"
+              multiline
+              value={leaveReason}
+              onChangeText={setLeaveReason}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setLeaveModalVisible(false)}
+                disabled={submittingLeave}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmitButton, submittingLeave && styles.buttonDisabled]}
+                onPress={handleCreateLeave}
+                disabled={submittingLeave}
+              >
+                {submittingLeave ? (
+                  <View style={styles.buttonRow}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.modalSubmitText}>Submitting…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.modalSubmitText}>Submit Request</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal: Add Employee */}
       <Modal

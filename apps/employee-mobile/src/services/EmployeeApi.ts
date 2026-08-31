@@ -257,4 +257,33 @@ export class EmployeeApi {
       'Failed to reset device binding'
     );
   }
+
+  // Leave Management methods
+  static getLeaves(session: any) {
+    return request(session, '/api/leave', 'GET', undefined, 'Could not load leave requests');
+  }
+
+  static requestLeave(session: any, data: { leave_type: 'PAID' | 'SICK' | 'CASUAL' | 'UNPAID'; start_date: string; end_date: string; reason: string }) {
+    return request(session, '/api/leave', 'POST', data, 'Could not submit leave request');
+  }
+
+  // SOS Emergency Dispatch methods
+  static triggerSos(session: any, location: DevicePosition, note?: string) {
+    return request(
+      session,
+      '/api/sos',
+      'POST',
+      {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        note: note || 'EMERGENCY SOS ALERT',
+      },
+      'Could not send emergency SOS alert'
+    );
+  }
+
+  static getActiveSos(session: any) {
+    return request(session, '/api/sos', 'GET', undefined, 'Could not load active SOS alert');
+  }
 }

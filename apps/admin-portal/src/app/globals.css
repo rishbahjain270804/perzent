@@ -801,3 +801,37 @@ body {
   .route-playback-disc { transition: none; }
   .dashboard-toast { animation: none; }
 }
+
+/* Realistic Coming Soon Page Animations */
+@keyframes floatCard1 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(0.5deg); }
+}
+
+@keyframes floatCard2 {
+  0%, 100% { transform: translateY(-50%) rotate(0deg); }
+  50% { transform: translateY(calc(-50% - 7px)) rotate(-0.5deg); }
+}
+
+@keyframes floatCard3 {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-6px) scale(1.02); }
+}
+
+@keyframes pulseRadar {
+  0% { transform: scale(1); opacity: 0.85; }
+  70% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes floatDevice {
+  0%, 100% { transform: translateY(0px) rotate(0.8deg); }
+  50% { transform: translateY(-7px) rotate(-0.4deg); }
+}
+
+.animate-float-card1 { animation: floatCard1 5.5s ease-in-out infinite; }
+.animate-float-card2 { animation: floatCard2 6.5s ease-in-out infinite 1.2s; }
+.animate-float-card3 { animation: floatCard3 5.8s ease-in-out infinite 0.6s; }
+.animate-pulse-radar { animation: pulseRadar 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.animate-device-breathe { animation: floatDevice 7.5s ease-in-out infinite; }
+

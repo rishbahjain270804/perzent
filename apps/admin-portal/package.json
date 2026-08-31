@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cashfreepayments/cashfree-js": "^1.0.7",
+    "@google/stitch-sdk": "^0.3.5",
     "@perzent/database": "workspace:*",
     "@perzent/location-engine": "workspace:*",
     "@perzent/shared-types": "workspace:*",

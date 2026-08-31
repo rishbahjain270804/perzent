@@ -16,10 +16,13 @@ export function PublicPage({
 }) {
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans antialiased">
-      <header className="h-14 px-4 sm:px-6 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
+      <header className="h-16 sm:h-18 px-4 sm:px-6 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-[#16A34A] flex items-center justify-center font-bold text-sm text-white shrink-0">P</div>
-          <span className="font-bold text-sm tracking-tight">PERZENT</span>
+          <img
+            src="/perzent-logo-full.png"
+            alt="Perzent Official Logo"
+            className="h-10 sm:h-11 w-auto object-contain shrink-0"
+          />
         </Link>
         <nav className="flex items-center gap-3 text-xs" aria-label="Header">
           <Link href={BRAND.faqPath} className="text-slate-600 hover:text-slate-900 hidden sm:inline">FAQ</Link>

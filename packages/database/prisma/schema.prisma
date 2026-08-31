@@ -95,6 +95,7 @@ model Company {
   sites                      GeofenceSite[]
   leave_requests             LeaveRequest[]
   payments                   PaymentTransaction[]
+  sos_alerts                 SosAlert[]
 }
 
 model Department {
@@ -162,6 +163,8 @@ model User {
   password_resets PasswordReset[]
   leave_requests LeaveRequest[] @relation("EmployeeLeaves")
   approved_leaves LeaveRequest[] @relation("ApprovedLeaves")
+  sos_alerts     SosAlert[]     @relation("EmployeeSosAlerts")
+  resolved_sos   SosAlert[]     @relation("ResolvedSosAlerts")
   managed_payment_orders PaymentTransaction[] @relation("PaymentManager")
   provisioned_payments   PaymentTransaction[] @relation("ProvisionedUser")
 
@@ -443,4 +446,45 @@ model PasswordReset {
 
   @@index([user_id])
   @@index([expires_at])
+}
+
+enum SosStatus {
+  ACTIVE
+  RESOLVED
+  DISMISSED
+}
+
+model SosAlert {
+  id             String    @id @default(uuid())
+  company_id     String
+  user_id        String
+  latitude       Float
+  longitude      Float
+  accuracy       Float     @default(10.0)
+  status         SosStatus @default(ACTIVE)
+  note           String?
+  resolved_by_id String?
+  resolved_at    DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  company        Company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user           User      @relation("EmployeeSosAlerts", fields: [user_id], references: [id], onDelete: Cascade)
+  resolver       User?     @relation("ResolvedSosAlerts", fields: [resolved_by_id], references: [id], onDelete: SetNull)
+
+  @@index([company_id, status, created_at])
+  @@index([user_id, status])
+}
+
+model WaitlistEntry {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  company_name String?
+  staff_size   Int      @default(10)
+  phone        String?
+  source       String   @default("COMING_SOON_PAGE")
+  created_at   DateTime @default(now())
+
+  @@index([email])
+  @@index([created_at])
 }
