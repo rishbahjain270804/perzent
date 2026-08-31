@@ -16,7 +16,8 @@ const PROJECT_REF = process.env.SUPABASE_PROJECT_REF || (() => {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || (PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : '');
 
 /** Access tokens for the hot path are short-lived; clients refresh via GET /api/auth. */
-export const DIRECT_TOKEN_TTL_SECONDS = 12 * 60 * 60;
+/** Short-lived: the app refreshes 30 min before expiry, and app_user_id() re-checks User.status on every call. */
+export const DIRECT_TOKEN_TTL_SECONDS = 60 * 60;
 
 const b64url = (input: Buffer | string) => Buffer.from(input).toString('base64url');
 

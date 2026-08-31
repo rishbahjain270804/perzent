@@ -3,7 +3,7 @@ import { prisma } from '@perzent/database';
 import { AttendanceActionSchema, DATE_ONLY_REGEX } from '@perzent/shared-types';
 import { attendanceSummary, checkOut, findOpenAttendance, isOpen } from '@/lib/attendance';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
-import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { getCompanyPolicy } from '@/lib/policy';
 import { addDays, localDateString, localTimeString, workDateFromString, workDateToString, zonedTimeToUtc } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,6 @@ export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
     const policy = await getCompanyPolicy(session.companyId);
-    await enforceCompanyPolicies(policy.id, { policy });
 
     const { searchParams } = new URL(request.url);
     let from: Date | null;

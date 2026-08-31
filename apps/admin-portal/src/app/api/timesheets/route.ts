@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { DATE_ONLY_REGEX } from '@perzent/shared-types';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
-import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { getCompanyPolicy } from '@/lib/policy';
 import { addDays, localDateString, localTimeString, workDateFromString } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,6 @@ export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
     const policy = await getCompanyPolicy(session.companyId);
-    await enforceCompanyPolicies(policy.id, { policy });
 
     const { searchParams } = new URL(request.url);
     const startStr = searchParams.get('start_date') || localDateString(policy.timezone, addDays(new Date(), -31));

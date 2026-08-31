@@ -14,6 +14,13 @@ import {
   setSessionCookie,
 } from '@/lib/auth';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
+
+/** One bcrypt hash per instance, computed lazily: failed logins for unknown users cost a compare (like real ones), not a fresh 12-round hash. */
+let dummyHashValue: string | null = null;
+async function dummyHash(): Promise<string> {
+  dummyHashValue ??= await hash('perzent-timing-equaliser', 12);
+  return dummyHashValue;
+}
 import { supabaseDirectConfig } from '@/lib/supabase-token';
 import { getAppConfig, maintenanceApplies, statusView } from '@/lib/app-config';
 import { isValidTimeZone } from '@/lib/time';
@@ -170,7 +177,7 @@ export async function POST(request: Request) {
     }
     if (!user) {
       // Burn equivalent time when no candidate exists so response timing does not reveal account presence.
-      if (candidates.length === 0) await hash(parsed.password, 12);
+      if (candidates.length === 0) await compare(parsed.password, await dummyHash());
       return jsonError('Invalid phone/email or password', 401, 'INVALID_CREDENTIALS');
     }
     if (user.status !== 'ACTIVE') {

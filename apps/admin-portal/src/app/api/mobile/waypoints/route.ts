@@ -4,7 +4,6 @@ import { calculateHaversineDistance } from '@perzent/location-engine';
 import { SYSTEM_CONFIG, WaypointBatchSchema } from '@perzent/shared-types';
 import { findOpenAttendance } from '@/lib/attendance';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
-import { enforceCompanyPolicies } from '@/lib/policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +15,6 @@ export async function POST(request: Request) {
     const raw = await request.json();
     const parsed = WaypointBatchSchema.parse(Array.isArray(raw?.waypoints) ? raw : { waypoints: [raw] });
 
-    await enforceCompanyPolicies(session.companyId);
     const attendance = await findOpenAttendance(session.userId);
     if (!attendance) {
       return jsonError('No active shift. Tracking has been stopped.', 409, 'NO_ACTIVE_SHIFT');
@@ -92,7 +90,7 @@ export async function POST(request: Request) {
     let ingested = 0;
     if (fresh.length > 0) {
       const [created] = await prisma.$transaction([
-        prisma.locationWaypoint.createMany({ data: fresh }),
+        prisma.locationWaypoint.createMany({ data: fresh, skipDuplicates: true }),
         prisma.userDevice.updateMany({ where: { user_id: session.userId, is_active: true }, data: { last_seen_at: new Date() } }),
       ]);
       ingested = created.count;

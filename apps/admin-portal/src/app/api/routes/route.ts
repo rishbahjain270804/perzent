@@ -9,6 +9,9 @@ import { addDays, localDateString, workDateFromString, zonedTimeToUtc } from '@/
 
 export const dynamic = 'force-dynamic';
 
+/** A full driving day at 10 m thinning is a few thousand points; cap the raw-row path so one request can't return unbounded rows. */
+const MAX_TRAIL_POINTS = 5000;
+
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
@@ -41,7 +44,7 @@ export async function GET(request: Request) {
     const attendance = await prisma.attendanceRecord.findUnique({
       where: { user_id_work_date: { user_id: user.id, work_date: workDate } },
       include: {
-        waypoints: { orderBy: { recorded_at: 'asc' } },
+        waypoints: { orderBy: { recorded_at: 'asc' }, take: MAX_TRAIL_POINTS },
         breaks: { orderBy: { start_time: 'asc' } },
       },
     });
@@ -58,6 +61,7 @@ export async function GET(request: Request) {
       points = await prisma.locationWaypoint.findMany({
         where: { user_id: user.id, recorded_at: { gte: dayStart, lt: dayEnd } },
         orderBy: { recorded_at: 'asc' },
+        take: MAX_TRAIL_POINTS,
       });
     }
     if (points.length === 0 && attendance?.punch_in_lat != null && attendance?.punch_in_lng != null) {

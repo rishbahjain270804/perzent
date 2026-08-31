@@ -143,7 +143,9 @@ export async function runMaintenance(): Promise<MaintenanceSummary> {
   };
   // Compact closed shifts into RouteArchive first so retention deletes as little raw data as possible.
   const { compactClosedShifts } = await import('./route-archive');
-  const compaction = await compactClosedShifts({ minAgeHours: 3, limit: 400 });
+  // ~3 round trips per shift inside a 60 s function budget: keep the batch small; the cron is daily
+  // and the backlog simply carries over.
+  const compaction = await compactClosedShifts({ minAgeHours: 3, limit: 60 });
   summary.shifts_compacted = compaction.compacted;
   summary.points_compacted = compaction.points_removed;
   const companies = await prisma.company.findMany({ select: policySelect });

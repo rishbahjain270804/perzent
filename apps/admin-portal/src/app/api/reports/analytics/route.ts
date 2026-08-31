@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@perzent/database';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
-import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { getCompanyPolicy } from '@/lib/policy';
 import { addDays, localMinutesOfDay, workDateFor } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,6 @@ export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
     const policy = await getCompanyPolicy(session.companyId);
-    await enforceCompanyPolicies(policy.id, { policy });
 
     const daysParam = parseInt(new URL(request.url).searchParams.get('days') || '30', 10);
     if (!ALLOWED_WINDOWS.includes(daysParam)) return jsonError('days must be 7, 30 or 90', 400, 'VALIDATION');

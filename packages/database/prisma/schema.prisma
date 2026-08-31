@@ -168,6 +168,8 @@ model User {
   @@unique([company_id, email])
   @@index([company_id, role, status])
   @@index([manager_id])
+  @@index([phone])
+  @@index([email])
 }
 
 model UserDevice {
@@ -226,6 +228,8 @@ model AttendanceRecord {
   @@unique([user_id, work_date])
   @@index([work_date, status])
   @@index([site_id])
+  @@index([user_id, status, punch_in_time])
+  @@index([status, punch_out_time])
 }
 
 model AttendanceBreak {
@@ -276,6 +280,7 @@ model LocationWaypoint {
   attendance     AttendanceRecord  @relation(fields: [attendance_id], references: [id], onDelete: Cascade)
   user           User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@unique([attendance_id, recorded_at])
   @@index([user_id, recorded_at])
   @@index([attendance_id, recorded_at])
 }
@@ -303,6 +308,8 @@ model AppConfig {
   play_store_url           String?
   support_email            String?
   support_phone            String?
+  /// Partial override of RemoteConfig (packages/shared-types/src/remote-config.ts); null = defaults.
+  remote_config            Json?
   updated_at               DateTime  @updatedAt
 }
 

@@ -3,18 +3,18 @@ import { prisma } from '@perzent/database';
 import { currentDwellMinutes } from '@perzent/location-engine';
 import { SYSTEM_CONFIG, type LiveTeamMember } from '@perzent/shared-types';
 import { authErrorResponse, requireSession } from '@/lib/auth';
-import { enforceCompanyPolicies, getCompanyPolicy } from '@/lib/policy';
+import { getCompanyPolicy } from '@/lib/policy';
 import { workDateFor } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
-const RECENT_POINTS = 25;
+/** Only recent[0] and the dwell estimate read these; 10 covers the dwell window without dragging a trail per employee. */
+const RECENT_POINTS = 10;
 
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request, ['OWNER', 'MANAGER']);
     const policy = await getCompanyPolicy(session.companyId);
-    await enforceCompanyPolicies(policy.id, { policy });
     const today = workDateFor(policy.timezone);
 
     const users = await prisma.user.findMany({
@@ -24,6 +24,8 @@ export async function GET(request: Request) {
         status: 'ACTIVE',
         ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
       },
+      // Polled every few seconds by every manager: never pull secrets or blobs into the function.
+      omit: { password_hash: true, face_encoding: true },
       include: {
         department: { select: { name: true } },
         devices: { where: { is_active: true }, orderBy: { last_seen_at: 'desc' }, take: 1 },

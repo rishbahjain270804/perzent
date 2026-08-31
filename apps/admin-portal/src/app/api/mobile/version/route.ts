@@ -23,7 +23,8 @@ export async function GET(request: Request) {
         play_store_url: config.play_store_url || base.play_store_url,
         ...status,
       },
-      { headers: { 'Cache-Control': 'no-store' } }
+      // Pure read of the 30 s-cached AppConfig; let the CDN absorb the fleet's periodic polls.
+      { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=300' } }
     );
   } catch (error) {
     console.error('version endpoint: config lookup failed', error);
