@@ -139,11 +139,15 @@ export function playbackFromArchive(archive: ArchiveRow, user: { id: string; ful
  * Compacts closed shifts whose raw points are at least `minAgeHours` old into RouteArchive rows and
  * deletes the raw rows. Safe to re-run; processes up to `limit` shifts per call (cron budget).
  */
-export async function compactClosedShifts(options: { minAgeHours?: number; limit?: number } = {}) {
+export async function compactClosedShifts(options: { minAgeHours?: number; limit?: number; timeBudgetMs?: number } = {}) {
   const minAge = new Date(Date.now() - (options.minAgeHours ?? 3) * 3600e3);
   const limit = options.limit ?? 200;
+  // Time-boxed rather than count-boxed: the daily cron has a 60 s budget, and an unfinished backlog
+  // simply carries over — but it must never be allowed to grow faster than it is drained (see purge).
+  const stopAt = Date.now() + (options.timeBudgetMs ?? 45_000);
   let compacted = 0;
   let pointsRemoved = 0;
+  let timedOut = false;
 
   const candidates = await prisma.attendanceRecord.findMany({
     where: {
@@ -158,6 +162,10 @@ export async function compactClosedShifts(options: { minAgeHours?: number; limit
   });
 
   for (const record of candidates) {
+    if (Date.now() > stopAt) {
+      timedOut = true;
+      break;
+    }
     const [points, breaks] = await Promise.all([
       prisma.locationWaypoint.findMany({
         where: { attendance_id: record.id },
@@ -210,5 +218,5 @@ export async function compactClosedShifts(options: { minAgeHours?: number; limit
     pointsRemoved += points.length;
   }
 
-  return { compacted, points_removed: pointsRemoved, remaining: candidates.length === limit };
+  return { compacted, points_removed: pointsRemoved, remaining: timedOut || candidates.length === limit };
 }
