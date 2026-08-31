@@ -85,7 +85,18 @@ export async function requireSession(request: Request, allowedRoles?: Role[]): P
   }
 
   const tokenHash = hashToken(token);
-  const lookup = () => prisma.session.findUnique({ where: { token_hash: tokenHash }, include: { user: true } });
+  // Every authenticated request runs this: select only what the session context needs, never the
+  // password hash or face blob.
+  const lookup = () =>
+    prisma.session.findUnique({
+      where: { token_hash: tokenHash },
+      select: {
+        id: true,
+        expires_at: true,
+        last_seen_at: true,
+        user: { select: { id: true, company_id: true, role: true, status: true, full_name: true, email: true, phone: true } },
+      },
+    });
 
   let session: Awaited<ReturnType<typeof lookup>>;
   try {
