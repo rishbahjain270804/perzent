@@ -86,6 +86,7 @@ export async function GET(request: Request) {
         'Employee Name', 'Phone', 'Department', 'Designation', 'Date', 'Shift Status',
         `Punch In (${policy.timezone})`, `Punch Out (${policy.timezone})`,
         'Gross Hours', 'Break Hours', 'Net Worked Hours', 'Regular Hours', 'Overtime Hours', 'Site / Location',
+        'Needs Review', 'Review Reason',
       ];
       const lines = [headers.map(csvCell).join(',')];
       for (const row of rows) {
@@ -93,6 +94,7 @@ export async function GET(request: Request) {
           csvCell(row.user_name), csvCell(row.phone), csvCell(row.department), csvCell(row.designation), csvCell(row.work_date),
           csvCell(row.status), csvCell(row.punch_in_local), csvCell(row.punch_out_local || ''),
           row.gross_hours, row.break_hours, row.net_hours, row.regular_hours, row.overtime_hours, csvCell(row.site_name),
+          row.needs_review ? 'YES' : '', csvCell(row.review_reason || ''),
         ].join(','));
       }
       return new NextResponse(`﻿${lines.join('\r\n')}`, {

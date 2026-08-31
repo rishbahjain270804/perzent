@@ -17,10 +17,10 @@ const EMPLOYEE_FAQ: QA[] = [
   { q: 'Why can I only use one phone?', a: 'Each account is bound to one phone to prevent buddy punching. If you change phones, ask your manager or owner to reset the device; then sign in on the new one.' },
   { q: 'What does "Check-in blocked" mean?', a: 'The readiness card lists what must be fixed: location permission, GPS on, Battery Saver off, battery above 5 %, and no mock-location app. Each item is checked again automatically.' },
   { q: 'How long can a break be?', a: 'Your company sets a maximum (30 minutes by default). When it runs out the shift resumes automatically and location sharing restarts.' },
-  { q: 'What if I forget to check out?', a: 'Your company sets an auto check-out time (23:40 by default). The shift is closed automatically at that time and your hours are calculated up to it. A manager can also correct it.' },
+  { q: 'What if I forget to check out?', a: 'The app reminds you 30 minutes before your company\'s auto check-out time (23:40 by default). If you still do not check out, the shift is closed automatically at that time and your hours are calculated up to it; the day is flagged for your manager, who can correct it.' },
   { q: 'What happens with no internet?', a: 'Location points are saved on the phone and sent automatically when the connection returns. Check-in, break and check-out need internet.' },
   { q: 'My phone restarted — do I need to do anything?', a: 'No. If a shift was open, tracking resumes by itself after the phone unlocks (app version 1.2.0 or later).' },
-  { q: 'How do I see my hours?', a: 'Your employer sees attendance and timesheets in the portal and can share them. In-app history is planned.' },
+  { q: 'How do I see my hours?', a: 'The duty screen shows a "Last 7 days" card with hours worked, shifts and breaks, and tells you if a day was closed automatically. Your employer has the full timesheets and can share or export them.' },
 ];
 
 const OWNER_FAQ: QA[] = [

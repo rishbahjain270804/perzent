@@ -62,7 +62,7 @@ export default function LoginScreen({
             style={styles.input}
             value={phone}
             onChangeText={setPhone}
-            placeholder="Phone number"
+            placeholder="+91 98765 43210"
             placeholderTextColor="#94A3B8"
             keyboardType="phone-pad"
             autoComplete="tel"

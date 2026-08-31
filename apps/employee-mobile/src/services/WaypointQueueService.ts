@@ -253,6 +253,10 @@ export class WaypointQueueService {
   static async clear(): Promise<void> {
     this.memory = [];
     this.resetBackoff();
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     try {
       await AsyncStorage.removeItem(QUEUE_STORAGE_KEY);
     } catch {

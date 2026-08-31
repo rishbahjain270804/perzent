@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import { Wrench, Megaphone } from 'lucide-react';
 
 /** Public pages that must stay reachable during maintenance (store review, policy, downloads). */
-const EXEMPT_PATHS = ['/', '/privacy', '/download'];
+/** Public/legal/support pages and the password-reset flow stay reachable during maintenance. */
+const EXEMPT_PATHS = ['/', '/privacy', '/download', '/faq', '/support', '/terms', '/account-deletion', '/forgot-password', '/reset-password'];
 
 type Status = {
   maintenance: { enabled: boolean; web: boolean; title: string; message: string; until: string | null };

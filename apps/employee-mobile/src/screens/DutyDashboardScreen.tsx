@@ -314,7 +314,8 @@ export default function DutyDashboardScreen({
       maxBreakMinutes: policy.max_break_minutes,
       breakStartedAt: shiftStatus === 'ON_BREAK' ? new Date(Date.now() - breakTimerRef.current * 1000).toISOString() : null,
     }).catch(() => undefined);
-  }, [shiftStatus, policy]);
+    // Primitive deps: `policy` is a fresh object on every 60 s server sync; rescheduling then would be noise.
+  }, [shiftStatus, policy.auto_checkout_time, policy.timezone, policy.max_break_minutes]);
 
   // Shift history card (last 7 days), refreshed whenever the shift state changes.
   const [history, setHistory] = useState<any>(null);
@@ -933,7 +934,7 @@ export default function DutyDashboardScreen({
           {/* App Version & Manual Update Card */}
           <View style={styles.appVersionCard}>
             <View style={styles.appVersionInfo}>
-              <Text style={styles.appVersionTitle}>Perzent Workforce</Text>
+              <Text style={styles.appVersionTitle}>Perzent</Text>
               <Text style={styles.appVersionSubtitle}>
                 Version {AutoUpdateService.getCurrentVersion().version} (Build #{AutoUpdateService.getCurrentVersion().versionCode})
               </Text>

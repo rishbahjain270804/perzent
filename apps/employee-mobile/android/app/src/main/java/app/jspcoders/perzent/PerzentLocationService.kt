@@ -987,6 +987,7 @@ class PerzentLocationService : Service() {
      * final upload of the offline queue is attempted on the worker before it shuts down.
      */
     internal fun shutdown(flushBeforeExit: Boolean) {
+        clearGpsOffAlert() // never leave a "location is off" alert behind once the shift is over
         if (shuttingDown) return
         shuttingDown = true
         mainHandler.removeCallbacksAndMessages(null)

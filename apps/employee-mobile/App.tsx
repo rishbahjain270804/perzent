@@ -24,6 +24,7 @@ import { AutoUpdateService, UpdateDecision } from './src/services/AutoUpdateServ
 import { BackgroundTrackingService } from './src/services/BackgroundTrackingService';
 import { SessionEvents } from './src/services/SessionEvents';
 import { RemoteConfigService, REMOTE_STATUS_POLL_MS, type RemoteStatus } from './src/services/RemoteConfigService';
+import { ReminderService } from './src/services/ReminderService';
 
 /** Catches render-time crashes so the employee sees a branded recovery screen instead of a blank app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -184,6 +185,7 @@ export default function App() {
                     onDutyRef.current = onDuty;
                   }}
                   onLogout={async () => {
+                    await ReminderService.cancelAll().catch(() => undefined);
                     await BackgroundTrackingService.stop().catch(() => undefined);
                     await EmployeeApi.logout(session).catch(() => undefined);
                     await DeviceBindingService.clearSession();

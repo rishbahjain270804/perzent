@@ -1,3 +1,4 @@
+import { BRAND } from '@perzent/shared-types';
 /**
  * Cashfree Payment Gateway Integration Helper
  * Cashfree PG API Version: 2023-08-01
@@ -88,7 +89,7 @@ export async function createCashfreeOrder(params: CashfreeOrderParams): Promise<
           customer_id: params.customer_id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50),
           customer_name: params.customer_name || 'Business Owner',
           customer_phone: cleanPhone,
-          customer_email: params.customer_email || 'billing@perzent.app',
+          customer_email: params.customer_email || BRAND.supportEmail,
         },
         order_meta: {
           return_url: params.return_url,

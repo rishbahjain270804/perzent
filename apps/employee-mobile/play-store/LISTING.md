@@ -72,7 +72,21 @@ Support: https://perzent.jspcoders.app/support · jspcoders@gmail.com
 Developed by JSP Coders.
 ```
 
-### Release notes (What's new, max 500)
+### Release notes — 1.3.0 (13) (What's new, max 500)
+
+```
+<en-GB>
+• Check-in never hangs: clear message when the GPS signal is weak
+• Alert if GPS is switched off during a shift
+• Reminders before auto check-out and when a break is about to end
+• "Last 7 days" card with your hours, shifts and breaks
+• Warns before logging out with an open shift
+• Queued location points survive a session expiry
+• Targets Android 16
+</en-GB>
+```
+
+### Release notes — 1.2.0 (12) (What's new, max 500)
 
 ```
 First public release.
