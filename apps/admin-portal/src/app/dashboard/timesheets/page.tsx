@@ -30,7 +30,19 @@ interface TimesheetRow {
   net_hours: number;
   regular_hours: number;
   overtime_hours: number;
+  needs_review?: boolean;
+  review_reason?: string | null;
 }
+
+const ReviewBadge = ({ row }: { row: { needs_review?: boolean; review_reason?: string | null } }) =>
+  row.needs_review ? (
+    <span
+      title={row.review_reason || 'Needs review'}
+      className="inline-flex items-center rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+    >
+      Review
+    </span>
+  ) : null;
 
 interface TimesheetResponse {
   timesheets?: TimesheetRow[];
@@ -159,7 +171,7 @@ export default function TimesheetsPage() {
                   <p className="font-semibold text-xs dashboard-strong truncate">{row.user_name}</p>
                   <p className="text-[10px] text-[#6B7280] truncate">{row.department || 'No department'} · {row.site_name || 'Field'}</p>
                 </div>
-                <span className="font-mono text-[10px] text-[#6B7280]">{row.work_date}</span>
+                <span className="font-mono text-[10px] text-[#6B7280] flex items-center gap-1.5"><ReviewBadge row={row} />{row.work_date}</span>
               </div>
               <div className="grid grid-cols-4 gap-1 pt-2 border-t border-slate-800/60 text-[10px]">
                 <div><span className="text-[#6B7280] block">Gross</span><span className="font-mono text-slate-300">{row.gross_hours}h</span></div>
@@ -209,7 +221,7 @@ export default function TimesheetsPage() {
                       <p className="leading-tight">{row.user_name}</p>
                       <p className="text-[10px] text-slate-400">{row.phone}</p>
                     </td>
-                    <td className="p-3 text-slate-300 font-mono">{row.work_date}</td>
+                    <td className="p-3 text-slate-300 font-mono"><span className="flex items-center gap-1.5">{row.work_date}<ReviewBadge row={row} /></span></td>
                     <td className="p-3 text-slate-400">{row.department || '—'}</td>
                     <td className="p-3 text-slate-300">{row.gross_hours}h</td>
                     <td className="p-3 text-slate-400">{row.break_hours}h</td>

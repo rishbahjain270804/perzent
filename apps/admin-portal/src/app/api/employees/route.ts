@@ -3,6 +3,7 @@ import { hash } from 'bcryptjs';
 import { prisma } from '@perzent/database';
 import { EmployeeActionSchema, ProvisionEmployeeSchema } from '@perzent/shared-types';
 import { authErrorResponse, jsonError, requireSession, revokeUserSessions } from '@/lib/auth';
+import { checkOut, findOpenAttendance } from '@/lib/attendance';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,6 +139,13 @@ export async function PATCH(request: Request) {
     } else if (parsed.action === 'SUSPEND') {
       await prisma.user.update({ where: { id: user.id }, data: { status: 'SUSPENDED' } });
       await revokeUserSessions(user.id);
+      // A suspended employee must not keep accruing hours until the auto check-out cut-off.
+      const open = await findOpenAttendance(user.id);
+      if (open) {
+        await checkOut({ record: open, by: 'MANAGER', overrideReason: 'Account suspended by the company' }).catch((error) =>
+          console.error('suspend: could not close open shift', { user_id: user.id, error })
+        );
+      }
     } else if (parsed.action === 'REACTIVATE') {
       await prisma.user.update({ where: { id: user.id }, data: { status: 'ACTIVE' } });
     } else if (parsed.action === 'RESET_PASSWORD') {

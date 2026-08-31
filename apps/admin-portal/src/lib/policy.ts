@@ -30,10 +30,21 @@ export async function getCompanyPolicy(companyId: string): Promise<CompanyPolicy
   return { ...company, timezone: safeTimeZone(company.timezone) };
 }
 
-/** The instant at which an open shift must be auto-closed. Shifts that start after the cut-off run until the next day's cut-off. */
-export function autoCheckoutDeadline(policy: Pick<CompanyPolicy, 'timezone' | 'auto_checkout_time'>, workDate: Date, punchInTime: Date): Date {
+/**
+ * The instant at which an open shift must be auto-closed. Anchored to the LATEST time the employee
+ * was (re)started — punch-in, or the end of the most recent break/off-duty gap — so a shift resumed
+ * after the cut-off ("Start another shift" at 23:50) runs until the next day's cut-off instead of
+ * being closed again two minutes later with zero credit.
+ */
+export function autoCheckoutDeadline(
+  policy: Pick<CompanyPolicy, 'timezone' | 'auto_checkout_time'>,
+  workDate: Date,
+  punchInTime: Date,
+  lastResumeAt?: Date | null
+): Date {
   let deadline = zonedTimeToUtc(workDateToString(workDate), policy.auto_checkout_time, policy.timezone);
-  if (deadline <= punchInTime) deadline = addDays(deadline, 1);
+  const anchor = lastResumeAt && lastResumeAt > punchInTime ? lastResumeAt : punchInTime;
+  if (deadline <= anchor) deadline = addDays(deadline, 1);
   return deadline;
 }
 
@@ -61,15 +72,17 @@ export async function enforceCompanyPolicies(
   const openRecords = await prisma.attendanceRecord.findMany({
     where: { status: { in: ['CHECKED_IN', 'ON_BREAK'] }, user: { company_id: companyId } },
     include: {
-      breaks: { where: { end_time: null }, orderBy: { start_time: 'desc' }, take: 1 },
+      // Latest break of any kind: open → it is the active break; closed → its end is the last resume.
+      breaks: { orderBy: { start_time: 'desc' }, take: 1 },
       waypoints: { orderBy: { recorded_at: 'desc' }, take: 1 },
     },
   });
 
   for (const record of openRecords) {
     const nowDate = new Date();
-    const deadline = autoCheckoutDeadline(policy, record.work_date, record.punch_in_time);
-    const activeBreak = record.breaks[0];
+    const latestBreak = record.breaks[0];
+    const activeBreak = latestBreak && !latestBreak.end_time ? latestBreak : undefined;
+    const deadline = autoCheckoutDeadline(policy, record.work_date, record.punch_in_time, latestBreak?.end_time ?? null);
 
     if (nowDate >= deadline) {
       let breakMinutes = record.total_break_minutes;

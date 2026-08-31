@@ -75,6 +75,9 @@ export async function GET(request: Request) {
         net_hours: Number((netMinutes / 60).toFixed(2)),
         regular_hours: Number((regularMinutes / 60).toFixed(2)),
         overtime_hours: Number((overtimeMinutes / 60).toFixed(2)),
+        /** Rows a payroll reviewer should look at: closed by the auto check-out rule or edited by a manager. */
+        needs_review: record.status === 'AUTO_CHECKED_OUT' || Boolean(record.override_reason),
+        review_reason: record.status === 'AUTO_CHECKED_OUT' ? 'Auto checked-out (employee did not check out)' : record.override_reason || null,
       };
     });
 
