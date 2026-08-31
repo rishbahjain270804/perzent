@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Building2, User, Lock, ArrowRight, Globe, CheckCircle2 } from 'lucide-react';
@@ -20,6 +20,18 @@ export default function RegisterPage() {
     timezone: DEFAULT_TIMEZONE,
   });
   const [error, setError] = useState('');
+
+  // Default the company timezone to the browser's zone when it is one we list; India stays the fallback.
+  useEffect(() => {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (detected && TIMEZONE_OPTIONS.some((option) => option.value === detected)) {
+        setFormData((prev) => (prev.timezone === DEFAULT_TIMEZONE ? { ...prev, timezone: detected } : prev));
+      }
+    } catch {
+      // Keep the default.
+    }
+  }, []);
   const [loading, setLoading] = useState(false);
 
   const update = (key: keyof typeof formData) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
