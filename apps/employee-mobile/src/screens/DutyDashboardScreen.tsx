@@ -458,44 +458,65 @@ export default function DutyDashboardScreen({
     }
   };
 
+  /** Closes the shift; `afterSuccess` runs only when the server accepted the check-out. */
+  const performCheckOut = async (afterSuccess?: () => void) => {
+    setPendingAction('CHECK_OUT');
+    try {
+      const position = await EmployeeApi.currentPosition();
+      // Drain every queued batch before the shift closes (409 afterwards would drop them).
+      const flush = await WaypointQueueService.flushQueue(session, { force: true });
+      if (flush.outcome === 'AUTH_INVALID') return;
+      const result = await EmployeeApi.attendance(session, 'POST', {
+        action: 'check_out',
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+      });
+      applyServerTime(result?.server_time);
+      await BackgroundTrackingService.stop();
+      await WaypointQueueService.clear();
+      setShiftStatus('CHECKED_OUT');
+      setAlreadyCompletedToday(true);
+      setPunchInTimestamp(null);
+      setBreakStartTimestamp(null);
+      setLastWaypointTime(null);
+      setElapsedSec(0);
+      syncAttendanceState();
+      afterSuccess?.();
+    } catch (error) {
+      showActionError('Check-out failed', error);
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
   const handleCheckOut = () => {
     if (busy) return;
     Alert.alert('End shift?', 'Your checkout location will be verified before the shift ends.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Check out',
-        style: 'destructive',
-        onPress: async () => {
-          setPendingAction('CHECK_OUT');
-          try {
-            const position = await EmployeeApi.currentPosition();
-            // Drain every queued batch before the shift closes (409 afterwards would drop them).
-            const flush = await WaypointQueueService.flushQueue(session, { force: true });
-            if (flush.outcome === 'AUTH_INVALID') return;
-            const result = await EmployeeApi.attendance(session, 'POST', {
-              action: 'check_out',
-              latitude: position.latitude,
-              longitude: position.longitude,
-              accuracy: position.accuracy,
-            });
-            applyServerTime(result?.server_time);
-            await BackgroundTrackingService.stop();
-            await WaypointQueueService.clear();
-            setShiftStatus('CHECKED_OUT');
-            setAlreadyCompletedToday(true);
-            setPunchInTimestamp(null);
-            setBreakStartTimestamp(null);
-            setLastWaypointTime(null);
-            setElapsedSec(0);
-            syncAttendanceState();
-          } catch (error) {
-            showActionError('Check-out failed', error);
-          } finally {
-            setPendingAction(null);
-          }
-        },
-      },
+      { text: 'Check out', style: 'destructive', onPress: () => performCheckOut() },
     ]);
+  };
+
+  /**
+   * Logging out while checked in used to stop tracking silently and leave the shift open on the
+   * server until the auto check-out cut-off — inflated hours nobody asked for. Make the choice explicit.
+   */
+  const handleLogoutPress = () => {
+    if (busy) return;
+    if (shiftStatus === 'CHECKED_OUT') {
+      onLogout();
+      return;
+    }
+    Alert.alert(
+      'You are still checked in',
+      'If you log out now, location sharing stops on this phone but your shift stays open until the auto check-out time. Check out first?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log out anyway', style: 'destructive', onPress: onLogout },
+        { text: 'Check out & log out', onPress: () => performCheckOut(onLogout) },
+      ]
+    );
   };
 
   const handleStartBreak = () => {
@@ -689,7 +710,7 @@ export default function DutyDashboardScreen({
             <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={onLogout} style={styles.logoutButton} disabled={busy}>
+        <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </View>
