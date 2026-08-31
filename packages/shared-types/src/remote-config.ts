@@ -67,10 +67,35 @@ export type RemoteConfig = z.infer<typeof RemoteConfigSchema>;
 
 export const REMOTE_CONFIG_DEFAULTS: RemoteConfig = RemoteConfigSchema.parse({});
 
+/**
+ * Hosts the app may be pointed at by `api_base_url`. A remote override is powerful (every phone
+ * follows it), so even a tampered AppConfig row can only move traffic between our own hosts.
+ */
+export const ALLOWED_API_HOST_SUFFIXES = ['perzent.jspcoders.app', '.jspcoders.app', '.vercel.app'] as const;
+
+export function isAllowedApiBaseUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    return ALLOWED_API_HOST_SUFFIXES.some((suffix) => (suffix.startsWith('.') ? host.endsWith(suffix) : host === suffix));
+  } catch {
+    return false;
+  }
+}
+
 /** Merge a stored JSON override onto the defaults, dropping anything that fails validation. */
 export function resolveRemoteConfig(stored: unknown): RemoteConfig {
   const parsed = RemoteConfigSchema.safeParse(stored && typeof stored === 'object' ? stored : {});
-  if (parsed.success) return parsed.data;
-  // Invalid override: keep the product running on defaults rather than failing every client.
-  return REMOTE_CONFIG_DEFAULTS;
+  if (!parsed.success) {
+    // Invalid override: keep the product running on defaults rather than failing every client.
+    return REMOTE_CONFIG_DEFAULTS;
+  }
+  const config = parsed.data;
+  if (config.api_base_url && !isAllowedApiBaseUrl(config.api_base_url)) {
+    const { api_base_url: _ignored, ...rest } = config;
+    return rest as RemoteConfig;
+  }
+  return config;
 }

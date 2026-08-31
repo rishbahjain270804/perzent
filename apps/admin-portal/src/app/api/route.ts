@@ -24,6 +24,8 @@ export async function GET() {
       mobile_app: { latest_version: LATEST_APP_VERSION, latest_version_code: LATEST_APP_VERSION_CODE },
       timestamp: new Date().toISOString(),
     },
-    { status: healthy ? 200 : 503, headers: { 'Cache-Control': 'no-store' } }
+    // Public and unauthenticated: let the CDN absorb bursts so a poller cannot turn one SELECT 1
+    // per request into database load.
+    { status: healthy ? 200 : 503, headers: { 'Cache-Control': healthy ? 'public, s-maxage=10, stale-while-revalidate=30' : 'no-store' } }
   );
 }
