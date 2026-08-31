@@ -21,6 +21,7 @@ const ConfirmSchema = z.object({
 const BodySchema = z.discriminatedUnion('action', [RequestSchema, ConfirmSchema]);
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
 /**
  * Owner / manager self-service password reset. Employees have no email on file; their manager
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
           to: user.email,
           subject: `Reset your ${BRAND.productName} password`,
           text: `Hi ${user.full_name},\n\nSomeone asked to reset the password for your ${BRAND.productName} account. Open this link within 30 minutes to choose a new password:\n\n${link}\n\nIf you did not ask for this, ignore this email — your password stays the same.\n\n${BRAND.developerName} · ${BRAND.supportEmail}`,
-          html: `<p>Hi ${user.full_name},</p><p>Someone asked to reset the password for your ${BRAND.productName} account. Open this link within 30 minutes to choose a new password:</p><p><a href="${link}">${link}</a></p><p>If you did not ask for this, ignore this email — your password stays the same.</p><p>${BRAND.developerName} · ${BRAND.supportEmail}</p>`,
+          html: `<p>Hi ${escapeHtml(user.full_name)},</p><p>Someone asked to reset the password for your ${BRAND.productName} account. Open this link within 30 minutes to choose a new password:</p><p><a href="${link}">${link}</a></p><p>If you did not ask for this, ignore this email — your password stays the same.</p><p>${BRAND.developerName} · ${BRAND.supportEmail}</p>`,
         });
       }
       // Same answer whether or not the address exists.

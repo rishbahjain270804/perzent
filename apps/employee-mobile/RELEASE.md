@@ -59,6 +59,10 @@ npm run build:android:bundle          # -> android/app/build/outputs/bundle/rele
 the `.aab`.) The build targets `arm64-v8a` and `armeabi-v7a` (`gradle.properties`
 `reactNativeArchitectures`, `build.gradle` `abiFilters`).
 
+**Gotcha:** the React Native Gradle plugin only watches `apps/employee-mobile/` for JS changes. After editing a
+workspace package (`packages/shared-types`, `packages/location-engine`) run
+`./gradlew app:createBundleReleaseJsAndAssets --rerun-tasks` first, or the APK/AAB ships the old bundle.
+
 Sanity-test the release bundle on a real device before uploading, e.g. with
 `bundletool build-apks --connected-device` or by installing the release APK.
 
