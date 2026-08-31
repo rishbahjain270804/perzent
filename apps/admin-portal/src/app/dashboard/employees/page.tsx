@@ -1,4 +1,5 @@
 'use client';
+import { BRAND } from '@perzent/shared-types';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -90,6 +91,18 @@ function generatePassword(length = 8) {
   return Array.from(values, (value) => chars[value % chars.length]).join('');
 }
 
+/** wa.me deep link with the credentials and download link pre-filled, so an owner can onboard an employee in one tap. */
+function whatsappShareUrl(phone: string, name: string, password: string): string {
+  const digits = phone.replace(/[^0-9]/g, '');
+  const text = [
+    `Hi ${name}, your ${BRAND.productName} account is ready.`,
+    `1. Install the app: ${BRAND.webUrl}/download`,
+    `2. Sign in with phone ${phone.trim()} and password: ${password}`,
+    `3. Allow location "All the time" and tap Check in when your shift starts.`,
+  ].join('\n');
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -97,6 +110,7 @@ export default function EmployeesPage() {
   const [listError, setListError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [notice, setNotice] = useState('');
+  const [shareUrl, setShareUrl] = useState('');
   const [rowError, setRowError] = useState('');
   const [busyRow, setBusyRow] = useState<string | null>(null);
 
@@ -233,6 +247,7 @@ export default function EmployeesPage() {
         },
       });
       setAddOpen(false);
+      setShareUrl(whatsappShareUrl(form.phone, created?.full_name || form.full_name, form.password));
       setNotice(
         `${created?.full_name || form.full_name} added. Share the phone number ${form.phone.trim()} and temporary password "${form.password}" with them — they sign in on the Android app.`
       );
@@ -342,6 +357,7 @@ export default function EmployeesPage() {
         json: { action: 'RESET_PASSWORD', id: passwordTarget.id, new_password: newPassword },
       });
       setNotice(`Password reset for ${passwordTarget.full_name}. New temporary password: "${newPassword}".`);
+      setShareUrl(whatsappShareUrl(passwordTarget.phone, passwordTarget.full_name, newPassword));
       setPasswordTarget(null);
     } catch (reason) {
       setPasswordError(errorMessage(reason, 'Could not reset the password.'));
@@ -511,7 +527,14 @@ export default function EmployeesPage() {
         }
       />
 
-      {notice && <Notice onDismiss={() => setNotice('')}>{notice}</Notice>}
+      {notice && (
+        <Notice onDismiss={() => { setNotice(''); setShareUrl(''); }}>
+          {notice}
+          {shareUrl && (
+            <a href={shareUrl} target="_blank" rel="noreferrer" className="ml-2 inline-flex items-center rounded-md bg-[#25D366] px-2.5 py-1 text-xs font-bold text-white hover:opacity-90">Share on WhatsApp</a>
+          )}
+        </Notice>
+      )}
       <ErrorBanner message={listError} onRetry={loadEmployees} retrying={loading} />
       <ErrorBanner message={rowError} />
 

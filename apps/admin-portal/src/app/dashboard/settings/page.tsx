@@ -257,7 +257,7 @@ export default function SettingsPage() {
                   onChange={(e) => updateSetting('auto_checkout_time', e.target.value)}
                   className={`${inputClass} font-mono`}
                 />
-                <p className={helpClass}>Open shifts are closed at this time each day (company timezone).</p>
+                <p className={helpClass}>Open shifts still running at this time are closed automatically (company timezone). Pick a time when nobody is working — for night shifts that ends after midnight, set a morning time such as 06:00, not 23:40.</p>
               </div>
               {numberField('standard_daily_hours', 'Standard daily hours', 'Hours beyond this count as overtime', 0.5)}
               <div>

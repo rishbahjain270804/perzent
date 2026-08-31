@@ -110,6 +110,9 @@ function LoginForm() {
       </form>
 
       <div className="pt-2 border-t border-slate-800 text-center space-y-2">
+        <p className="text-[11px]">
+          <Link href="/forgot-password" className="text-[#86EFAC] hover:text-white underline underline-offset-2">Forgot your password?</Link>
+        </p>
         <p className="text-[11px] text-[#6B7280]">New to Perzent? The launch plan is free — unlimited staff.</p>
         <Link
           href="/register"
