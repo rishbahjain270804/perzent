@@ -177,6 +177,11 @@ export class EmployeeApi {
     return this.attendance(session);
   }
 
+  /** The employee's own recent shifts (newest first) with weekly totals. */
+  static async shiftHistory(session: any, days = 7) {
+    return request(session, `${API_CONFIG.ENDPOINTS.ATTENDANCE_HISTORY}?days=${days}`, 'GET', undefined, 'Could not load your shift history');
+  }
+
   /** Device telemetry / presence heartbeat — database-direct when available, API otherwise. */
   static async telemetry(session: any, telemetry: unknown, device?: unknown) {
     const direct = await DirectAccess.rpc(session, 'device_heartbeat', { p_telemetry: telemetry ?? {}, p_device: device ?? {} });

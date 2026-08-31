@@ -69,6 +69,8 @@ class PerzentLocationService : Service() {
         const val TAG = "PerzentLocationService"
         const val NOTIFICATION_CHANNEL_ID = "perzent_duty_tracking_v1"
         const val NOTIFICATION_ID = 99881
+        const val ALERT_CHANNEL_ID = "perzent_shift_alerts_v1"
+        const val ALERT_NOTIFICATION_ID = 99882
         const val PREFS_NAME = "perzent_service_prefs"
         const val KEY_TOKEN = "auth_token"
         const val KEY_USER_ID = "user_id"
@@ -388,6 +390,48 @@ class PerzentLocationService : Service() {
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+            val alerts = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "Shift alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Problems that stop location sharing during a shift, such as GPS being switched off"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(alerts)
+        }
+    }
+
+    /** Heads-up alert with a one-tap route to the location settings. Cleared when GPS comes back. */
+    private fun showGpsOffAlert() {
+        try {
+            val settingsIntent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 1, settingsIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_perzent)
+                .setContentTitle("Location is switched off")
+                .setContentText("Your shift is still open but your location is not being shared. Tap to turn GPS back on.")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("Your shift is still open but your location is not being shared. Tap to turn GPS back on."))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ERROR)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+            getSystemService(NotificationManager::class.java)?.notify(ALERT_NOTIFICATION_ID, notification)
+            Log.w(TAG, "GPS provider disabled during shift; alert shown")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show GPS-off alert", e)
+        }
+    }
+
+    private fun clearGpsOffAlert() {
+        try {
+            getSystemService(NotificationManager::class.java)?.cancel(ALERT_NOTIFICATION_ID)
+        } catch (_: Exception) {
         }
     }
 
@@ -543,8 +587,14 @@ class PerzentLocationService : Service() {
 
                 @Deprecated("Deprecated in Java")
                 override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-                override fun onProviderEnabled(provider: String) {}
-                override fun onProviderDisabled(provider: String) {}
+                override fun onProviderEnabled(provider: String) {
+                    if (provider == LocationManager.GPS_PROVIDER) clearGpsOffAlert()
+                }
+                override fun onProviderDisabled(provider: String) {
+                    // The employee switched GPS off mid-shift: tell them immediately instead of letting
+                    // the manager discover a "lost" marker two minutes later.
+                    if (provider == LocationManager.GPS_PROVIDER) showGpsOffAlert()
+                }
             }
             if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, UPDATE_INTERVAL_MS, 0f, listener, Looper.getMainLooper())

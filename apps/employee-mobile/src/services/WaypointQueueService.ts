@@ -59,12 +59,27 @@ export class WaypointQueueService {
     return this.memory;
   }
 
+  private static persistTimer: ReturnType<typeof setTimeout> | null = null;
+
   private static async persist(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     try {
       await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(this.memory ?? []));
-    } catch {
-      // Memory remains the source of truth; persistence is best effort.
+    } catch (error) {
+      console.warn('WaypointQueue: persist failed', error);
     }
+  }
+
+  /** Coalesces writes: one GPS fix every few seconds must not rewrite a 100 KB queue each time. */
+  private static persistSoon(delayMs = 5_000) {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.persist();
+    }, delayMs);
   }
 
   static async getQueue(): Promise<QueuedWaypoint[]> {
@@ -77,12 +92,19 @@ export class WaypointQueueService {
     if (queue.length > MAX_QUEUE_SIZE) {
       queue.splice(0, queue.length - MAX_QUEUE_SIZE);
     }
-    await this.persist();
+    this.persistSoon();
+  }
+
+  /** Transient 4xx statuses that must be retried, not treated as a malformed batch. */
+  private static isRetryableClientError(status: number) {
+    return status === 408 || status === 425 || status === 429;
   }
 
   private static scheduleBackoff() {
-    this.backoffMs = Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_MIN_MS, this.backoffMs * 2));
-    this.nextAttemptAt = Date.now() + this.backoffMs;
+    const base = Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_MIN_MS, this.backoffMs * 2));
+    // ±20 % jitter so a fleet recovering from an outage does not retry in lockstep.
+    this.backoffMs = base;
+    this.nextAttemptAt = Date.now() + Math.round(base * (0.8 + Math.random() * 0.4));
   }
 
   private static resetBackoff() {
@@ -131,9 +153,13 @@ export class WaypointQueueService {
             continue;
           }
           if (direct.status === 401 || direct.status === 403) {
-            queue.splice(0, queue.length);
-            await this.persist();
+            // Keep the points: a refreshed token or re-login will send them. Only stop flushing.
+            this.scheduleBackoff();
             return { outcome: 'AUTH_INVALID', sent, dropped };
+          }
+          if (this.isRetryableClientError(direct.status)) {
+            this.scheduleBackoff();
+            return { outcome: 'RETRY_LATER', sent, dropped };
           }
           if (direct.status >= 400 && direct.status < 500) {
             queue.splice(0, batch.length);
@@ -169,10 +195,14 @@ export class WaypointQueueService {
         }
 
         if (response.status === 401) {
-          queue.splice(0, queue.length);
-          await this.persist();
+          // Session expired mid-shift: the points are still valid after re-login, so keep them.
+          this.scheduleBackoff();
           SessionEvents.emitUnauthorized();
           return { outcome: 'AUTH_INVALID', sent, dropped };
+        }
+        if (this.isRetryableClientError(response.status)) {
+          this.scheduleBackoff();
+          return { outcome: 'RETRY_LATER', sent, dropped };
         }
         if (response.status === 409) {
           // Shift ended elsewhere; these points can never be accepted.

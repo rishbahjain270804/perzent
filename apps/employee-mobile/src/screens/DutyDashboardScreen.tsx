@@ -21,6 +21,8 @@ import { WaypointQueueService } from '../services/WaypointQueueService';
 import { BackgroundTrackingService } from '../services/BackgroundTrackingService';
 import { SessionEvents } from '../services/SessionEvents';
 import { DirectAccess } from '../services/DirectAccess';
+import { RemoteConfigService } from '../services/RemoteConfigService';
+import { ReminderService } from '../services/ReminderService';
 import { BRAND } from '@perzent/shared-types';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
@@ -29,14 +31,10 @@ type PendingAction = 'CHECK_IN' | 'START_BREAK' | 'RESUME' | 'CHECK_OUT' | null;
 type ShiftPolicy = { timezone: string; auto_checkout_time: string; max_break_minutes: number };
 
 const DEFAULT_POLICY: ShiftPolicy = { timezone: 'Asia/Kolkata', auto_checkout_time: '23:40', max_break_minutes: 30 };
-const READINESS_INTERVAL_MS = 15_000;
+/** Intervals come from remote config (AppConfig.remote_config) so cadence can be tuned without a release. */
+const cfgIntervals = () => RemoteConfigService.config.intervals;
 /** Every 4th readiness tick (60 s) the shift state is re-read from the server while a shift is open. */
 const SERVER_SYNC_EVERY_TICKS = 4;
-/** JS-side fallback ping; the native service is the primary tracker, so this only needs to be a safety net. */
-const JS_PING_INTERVAL_MS = 2 * 60 * 1000;
-/** The native service heartbeats telemetry every 45 s while tracking; the JS side only needs a slow backup cadence. */
-const ON_DUTY_TELEMETRY_INTERVAL_MS = 2 * 60 * 1000;
-const OFF_DUTY_TELEMETRY_INTERVAL_MS = 10 * 60 * 1000;
 const PRIVACY_POLICY_URL = `${BRAND.webUrl}${BRAND.privacyPath}`;
 const FAQ_URL = `${BRAND.webUrl}${BRAND.faqPath}`;
 const SUPPORT_URL = `${BRAND.webUrl}${BRAND.supportPath}`;
@@ -185,7 +183,7 @@ export default function DutyDashboardScreen({
         // Telemetry cadence: every 15 s while a shift is open, at most every 10 min while off duty.
         const shiftOpen = shiftStatusRef.current !== 'CHECKED_OUT';
         const sinceLastPatch = Date.now() - lastTelemetryPatchRef.current;
-        const due = sinceLastPatch >= (shiftOpen ? ON_DUTY_TELEMETRY_INTERVAL_MS : OFF_DUTY_TELEMETRY_INTERVAL_MS);
+        const due = sinceLastPatch >= (shiftOpen ? cfgIntervals().on_duty_telemetry_ms : cfgIntervals().off_duty_telemetry_ms);
         if (options.forceUpload || due) {
           lastTelemetryPatchRef.current = Date.now();
           await EmployeeApi.telemetry(session, next.telemetry, deviceInfo).catch(() => undefined);
@@ -282,7 +280,6 @@ export default function DutyDashboardScreen({
     const timer = setInterval(async () => {
       ticks += 1;
       refreshReadiness();
-      if (isManager) loadManagerTeam();
       const state = await BackgroundTrackingService.getState();
       // Re-sync with the server when the native service raised a flag, and periodically while a shift is
       // open so changes made elsewhere (manager check-out, kiosk, auto policies) reach the screen.
@@ -290,13 +287,45 @@ export default function DutyDashboardScreen({
       if (state.auth_invalid || state.shift_ended_remotely || state.permission_revoked || periodicDue) {
         syncAttendanceState();
       }
-    }, READINESS_INTERVAL_MS);
+    }, cfgIntervals().readiness_ms);
 
     return () => {
       mounted = false;
       clearInterval(timer);
     };
   }, [syncAttendanceState, refreshReadiness, isManager, loadManagerTeam]);
+
+  // Manager team list: only while the Team tab is on screen, on its own (slower) cadence.
+  useEffect(() => {
+    if (!isManager || activeTab !== 'TEAM') return;
+    loadManagerTeam();
+    const timer = setInterval(loadManagerTeam, cfgIntervals().manager_team_ms);
+    return () => clearInterval(timer);
+  }, [isManager, activeTab, loadManagerTeam]);
+
+  // Local reminders follow the shift state: "still working?" before auto check-out, "break ending".
+  const breakTimerRef = useRef(0);
+  breakTimerRef.current = breakTimerSec;
+  useEffect(() => {
+    ReminderService.sync({
+      status: shiftStatus,
+      autoCheckoutTime: policy.auto_checkout_time,
+      timezone: policy.timezone,
+      maxBreakMinutes: policy.max_break_minutes,
+      breakStartedAt: shiftStatus === 'ON_BREAK' ? new Date(Date.now() - breakTimerRef.current * 1000).toISOString() : null,
+    }).catch(() => undefined);
+  }, [shiftStatus, policy]);
+
+  // Shift history card (last 7 days), refreshed whenever the shift state changes.
+  const [history, setHistory] = useState<any>(null);
+  useEffect(() => {
+    if (!session || !RemoteConfigService.config.features.shift_history) return;
+    let cancelled = false;
+    EmployeeApi.shiftHistory(session, 7)
+      .then((data) => { if (!cancelled) setHistory(data); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [session, shiftStatus]);
 
   // AppState listener: re-sync attendance, reconcile the native service and re-inspect on resume.
   useEffect(() => {
@@ -349,7 +378,7 @@ export default function DutyDashboardScreen({
       }
     };
     pingLocation();
-    const locInterval = setInterval(pingLocation, JS_PING_INTERVAL_MS);
+    const locInterval = setInterval(pingLocation, cfgIntervals().js_ping_ms);
     return () => {
       cancelled = true;
       clearInterval(locInterval);
@@ -727,6 +756,33 @@ export default function DutyDashboardScreen({
                 Breaks used: {totalBreakMinutes} min • Shifts auto-close at {formatClockTime(policy.auto_checkout_time)}.
                 You can still start another shift if your manager needs you.
               </Text>
+            </View>
+          )}
+
+          {history?.totals && (
+            <View style={styles.historyCard}>
+              <Text style={styles.historyTitle}>Last 7 days</Text>
+              <View style={styles.historyRow}>
+                <View style={styles.historyStat}>
+                  <Text style={styles.historyValue}>{Math.floor(history.totals.net_worked_minutes / 60)}h {history.totals.net_worked_minutes % 60}m</Text>
+                  <Text style={styles.historyLabel}>worked</Text>
+                </View>
+                <View style={styles.historyStat}>
+                  <Text style={styles.historyValue}>{history.totals.shifts}</Text>
+                  <Text style={styles.historyLabel}>shifts</Text>
+                </View>
+                <View style={styles.historyStat}>
+                  <Text style={styles.historyValue}>{history.totals.total_break_minutes}m</Text>
+                  <Text style={styles.historyLabel}>breaks</Text>
+                </View>
+              </View>
+              {history.shifts?.[0] && !history.shifts[0].is_open && (
+                <Text style={styles.historyNote}>
+                  Last shift {history.shifts[0].work_date}: {Math.floor(history.shifts[0].net_worked_minutes / 60)}h {history.shifts[0].net_worked_minutes % 60}m
+                  {history.shifts[0].auto_checked_out ? ' — closed automatically at the auto check-out time. Remember to check out when you finish.' : ''}
+                  {history.shifts[0].corrected ? ' (corrected by your manager)' : ''}
+                </Text>
+              )}
             </View>
           )}
 
@@ -1241,6 +1297,13 @@ const styles = StyleSheet.create({
   privacyTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   privacyText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
   privacyLink: { color: '#166534', fontSize: 12, fontWeight: '800', marginTop: 8, textDecorationLine: 'underline' },
+  historyCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginTop: 14, borderWidth: 1, borderColor: '#E2E8F0' },
+  historyTitle: { color: '#0F172A', fontSize: 14, fontWeight: '800', marginBottom: 10 },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  historyStat: { flex: 1, alignItems: 'center' },
+  historyValue: { color: '#166534', fontSize: 18, fontWeight: '800' },
+  historyLabel: { color: '#64748B', fontSize: 11, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  historyNote: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 10 },
   helpCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginTop: 14, borderWidth: 1, borderColor: '#E2E8F0' },
   helpTitle: { color: '#0F172A', fontSize: 14, fontWeight: '800' },
   helpText: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 4 },

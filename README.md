@@ -77,6 +77,17 @@ See `apps/employee-mobile/RELEASE.md` (keystore, `keystore.properties`, `bundleR
 
 ## Remote status (maintenance, announcements, version) — no release needed
 
+### Remote config (no-release tuning)
+
+`AppConfig.remote_config` (JSON, same row as maintenance/announcements) overrides the defaults in
+`packages/shared-types/src/remote-config.ts`: API base URL, polling intervals, GPS gates
+(check-in fix timeout / max accuracy), feature switches (direct access, reminders, shift history),
+reminder offsets and copy overrides. Served as `config` on `/api/status` and `/api/mobile/version`;
+the app (1.3.0+) hydrates the last copy from disk at start-up and refreshes it every
+`intervals.status_poll_ms`. Partial JSON is fine — missing keys fall back to defaults, invalid JSON is
+ignored. Example: `{"intervals":{"portal_live_poll_ms":10000},"location":{"checkin_max_accuracy_m":150}}`.
+
+
 Table `AppConfig`, single row `id = global` (edit in Supabase → Table Editor). Read by `GET /api/status`
 (public, cached 30 s), `GET /api/mobile/version`, the app (on launch, resume, every 5 min and on any
 `503 MAINTENANCE`) and the portal (every 60 s).

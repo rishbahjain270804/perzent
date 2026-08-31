@@ -134,10 +134,8 @@ Play requires a separate declaration + review for `ACCESS_BACKGROUND_LOCATION`.
 
 ## 7. Target API level
 
-- This build targets **API 35** (Android 15), which satisfies Play's requirement for 2025.
-- **From 31 Aug 2026 Play requires target API 36 (Android 16)** for new apps and updates. Expo
-  SDK 52 / RN 0.76 does not officially support target 36 - plan an **Expo SDK upgrade (SDK 54+)**
-  before that date. Because `android/` is hand-maintained, the upgrade must be done by hand:
+- Since 1.3.0 (versionCode 13) the build targets **API 36** (Android 16) on RN 0.76: `android/build.gradle` defaults compile/target SDK to 36 with build-tools 36.0.0, and `android.suppressUnsupportedCompileSdk=36` in `gradle.properties` silences the AGP 8.6 "untested compileSdk" warning. Verified on a Galaxy S24 and a Redmi Note 10.
+- Play requires target API 36 from 31 Aug 2026; the bump above satisfies it. The full **Expo SDK 54** migration (RN 0.81, New Architecture, edge-to-edge) is still worthwhile within the year because SDK 52 will stop receiving fixes — Because `android/` is hand-maintained, the upgrade must be done by hand:
   regenerate a scratch project with the new SDK, diff its `android/` against ours, and port the
   custom Kotlin files, the manifest changes, the signing block and the notification icon.
 

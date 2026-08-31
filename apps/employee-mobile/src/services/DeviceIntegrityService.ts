@@ -1,6 +1,7 @@
 import { Linking, NativeModules, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
+import { RemoteConfigService } from './RemoteConfigService';
 import type { DeviceTelemetry } from '@perzent/shared-types';
 
 type NativeIntegrity = {
@@ -24,7 +25,8 @@ export type ComplianceBlocker = {
     | 'POWER_SAVER'
     | 'LOW_BATTERY'
     | 'MOCK_LOCATION'
-    | 'LOCATION_UNAVAILABLE';
+    | 'LOCATION_UNAVAILABLE'
+    | 'WEAK_GPS';
   message: string;
 };
 
@@ -140,12 +142,23 @@ export class DeviceIntegrityService {
     let position: WorkReadiness['position'];
     let mockLocationDetected = false;
     if (options.acquirePosition && permission.foreground && locationServicesEnabled) {
+      const gate = RemoteConfigService.config.location;
       try {
-        const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        // Indoors a high-accuracy fix can take minutes or never arrive; bound the wait so the button
+        // never sits on "Verifying…" forever, and reject fixes too coarse to prove attendance.
+        const current = await Promise.race<Location.LocationObject>([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+          new Promise<Location.LocationObject>((_, reject) => setTimeout(() => reject(new Error('GPS_TIMEOUT')), gate.checkin_fix_timeout_ms)),
+        ]);
         // expo-location 18: `mocked` is a property of the LocationObject, not of `coords`.
         mockLocationDetected = Boolean(current.mocked);
         if (mockLocationDetected) {
           blockers.push({ code: 'MOCK_LOCATION', message: 'Disable mock/fake location apps.' });
+        } else if ((current.coords.accuracy ?? 0) > gate.checkin_max_accuracy_m) {
+          blockers.push({
+            code: 'WEAK_GPS',
+            message: `Weak GPS signal (±${Math.round(current.coords.accuracy ?? 0)} m). Move near a window or outdoors; this re-checks automatically.`,
+          });
         } else {
           position = {
             latitude: current.coords.latitude,
@@ -153,8 +166,14 @@ export class DeviceIntegrityService {
             accuracy: current.coords.accuracy,
           };
         }
-      } catch {
-        blockers.push({ code: 'LOCATION_UNAVAILABLE', message: 'Move outdoors and wait for a verified GPS position.' });
+      } catch (error) {
+        const timedOut = error instanceof Error && error.message === 'GPS_TIMEOUT';
+        blockers.push({
+          code: 'LOCATION_UNAVAILABLE',
+          message: timedOut
+            ? `No GPS fix in ${Math.round(gate.checkin_fix_timeout_ms / 1000)} s. Move outdoors or near a window and try again.`
+            : 'Move outdoors and wait for a verified GPS position.',
+        });
       }
     }
 

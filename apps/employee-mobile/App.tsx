@@ -90,6 +90,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      await RemoteConfigService.hydrate();
       const info = await DeviceBindingService.getDeviceFingerprint();
       setDeviceInfo(info);
       const saved = await DeviceBindingService.getSavedSession();
@@ -112,8 +113,8 @@ export default function App() {
         checkUpdate();
       }
     });
-    const updateInterval = setInterval(checkUpdate, 15 * 60 * 1000);
-    const statusInterval = setInterval(refreshRemote, REMOTE_STATUS_POLL_MS);
+    const updateInterval = setInterval(checkUpdate, RemoteConfigService.config.intervals.update_check_ms);
+    const statusInterval = setInterval(refreshRemote, RemoteConfigService.config.intervals.status_poll_ms || REMOTE_STATUS_POLL_MS);
 
     // Connectivity: offline = no network or internet confirmed unreachable.
     const unsubscribeNet = NetInfo.addEventListener((state) => {
