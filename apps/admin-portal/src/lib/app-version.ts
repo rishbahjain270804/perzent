@@ -4,8 +4,8 @@
  * Environment overrides: LATEST_APP_VERSION, LATEST_APP_VERSION_CODE, MIN_APP_VERSION_CODE,
  * EMPLOYEE_APK_URL, NEXT_PUBLIC_PLAY_STORE_URL.
  */
-export const LATEST_APP_VERSION = '1.3.0';
-export const LATEST_APP_VERSION_CODE = 13;
+export const LATEST_APP_VERSION = '1.2.0';
+export const LATEST_APP_VERSION_CODE = 12;
 /** Builds below this code were signed with the debug key and must be uninstalled before updating. */
 export const REINSTALL_BELOW_VERSION_CODE = 12;
 
