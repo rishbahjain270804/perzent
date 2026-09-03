@@ -87,6 +87,7 @@ model Company {
   attendance_retention_days  Int            @default(45)
   standard_daily_hours       Float          @default(8.0)
   plan_tier                  String         @default("FREE")
+  seat_limit                 Int?
   created_at                 DateTime       @default(now())
   updated_at                 DateTime       @updatedAt
 

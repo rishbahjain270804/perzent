@@ -36,6 +36,7 @@ const companySelect = {
   attendance_retention_days: true,
   standard_daily_hours: true,
   plan_tier: true,
+  seat_limit: true,
 } as const;
 
 const userPayload = (user: any) => ({

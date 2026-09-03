@@ -80,6 +80,21 @@ export async function POST(request: Request) {
     const parsed = ProvisionEmployeeSchema.parse(await request.json());
     const phone = normalizePhone(parsed.phone);
 
+    // Enforce the company's purchased seat limit (null = unlimited). Owners don't consume a seat.
+    const company = await prisma.company.findUnique({ where: { id: session.companyId }, select: { seat_limit: true } });
+    if (company?.seat_limit != null) {
+      const usedSeats = await prisma.user.count({
+        where: { company_id: session.companyId, role: { not: 'OWNER' }, status: { not: 'TERMINATED' } },
+      });
+      if (usedSeats >= company.seat_limit) {
+        return jsonError(
+          `You've reached your plan's limit of ${company.seat_limit} team members. Remove a member or upgrade your plan to add more.`,
+          403,
+          'SEAT_LIMIT',
+        );
+      }
+    }
+
     const existing = await prisma.user.findFirst({ where: { company_id: session.companyId, phone } });
     if (existing) return jsonError('An employee with this phone number already exists.', 409, 'CONFLICT');
     if (parsed.email) {
