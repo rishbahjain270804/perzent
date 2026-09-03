@@ -189,6 +189,44 @@ export class EmployeeApi {
     return this.attendance(session, 'PATCH', { telemetry, device });
   }
 
+  /**
+   * Best-effort position for an EMERGENCY SOS: unlike currentPosition() this never refuses to
+   * return. It tries a quick fresh fix, then last-known, then a coarse fix, and only if the phone
+   * has never had any location does it throw — an SOS must go through even with GPS struggling or
+   * services just toggled off (last-known still resolves). Mock locations are still rejected.
+   */
+  static async sosPosition(): Promise<DevicePosition> {
+    const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (permission && !permission.granted) throw new Error('Location permission is required to send an SOS');
+
+    let position: Location.LocationObject | null = null;
+    try {
+      position = await Promise.race<Location.LocationObject>([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 5000)),
+      ]);
+    } catch {
+      position = await Location.getLastKnownPositionAsync().catch(() => null);
+    }
+    if (!position?.coords) {
+      position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest }).catch(() => null);
+    }
+    if (!position?.coords) {
+      position = await Location.getLastKnownPositionAsync({ maxAge: 600000 }).catch(() => null);
+    }
+    if (!position?.coords) {
+      throw new Error('Could not get your location. Move to open sky and try again, or call for help directly.');
+    }
+    if (position.mocked) throw new Error('Mock or fake location is not allowed');
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy ?? 50,
+      speed: position.coords.speed ?? 0,
+      heading: position.coords.heading ?? 0,
+    };
+  }
+
   static async currentPosition(): Promise<DevicePosition> {
     const permission = await Location.getForegroundPermissionsAsync();
     if (!permission.granted) throw new Error('Location permission is required');

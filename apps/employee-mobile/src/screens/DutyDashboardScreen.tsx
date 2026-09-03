@@ -24,6 +24,7 @@ import { DirectAccess } from '../services/DirectAccess';
 import { RemoteConfigService } from '../services/RemoteConfigService';
 import { ReminderService } from '../services/ReminderService';
 import { BRAND } from '@perzent/shared-types';
+import { SosButton } from '../components/SosButton';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'TEAM' | 'LEAVE';
@@ -730,33 +731,23 @@ export default function DutyDashboardScreen({
     }
   };
 
-  const handleTriggerSos = () => {
-    Alert.alert(
-      '🚨 EMERGENCY SOS ALERT',
-      'Are you in immediate danger or need urgent help? This will instantly broadcast your exact GPS location to your employer and manager.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'SEND SOS NOW',
-          style: 'destructive',
-          onPress: async () => {
-            setSendingSos(true);
-            try {
-              const pos = await EmployeeApi.currentPosition();
-              await EmployeeApi.triggerSos(session, pos, 'EMERGENCY SOS DISPATCH FROM APP');
-              Alert.alert(
-                '🚨 SOS ALERT SENT',
-                "Your live GPS location is now visible to your employer on the Perzent dashboard. If you are in immediate danger, also call local emergency services."
-              );
-            } catch (error) {
-              showActionError('SOS Dispatch Failed', error);
-            } finally {
-              setSendingSos(false);
-            }
-          },
-        },
-      ]
-    );
+  // The SosButton itself requires a deliberate press-and-hold, so this fires immediately — no
+  // extra dialog to read or tap while in distress. Uses sosPosition() (best-effort, never refuses).
+  const handleTriggerSos = async () => {
+    setSendingSos(true);
+    try {
+      const pos = await EmployeeApi.sosPosition();
+      await EmployeeApi.triggerSos(session, pos, 'EMERGENCY SOS DISPATCH FROM APP');
+      Alert.alert(
+        '🚨 SOS alert sent',
+        'Your live location is now on your employer dashboard and an alert email has gone to your owner and manager. If you are in immediate danger, also call local emergency services.',
+      );
+    } catch (error) {
+      showActionError('SOS could not be sent', error);
+      throw error;
+    } finally {
+      setSendingSos(false);
+    }
   };
 
   const statusLabel = shiftStatus === 'CHECKED_IN'
@@ -780,6 +771,7 @@ export default function DutyDashboardScreen({
   const stalledCount = teamMembers.filter((m) => m.is_gps_disconnected).length;
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView
       contentContainerStyle={styles.page}
       refreshControl={
@@ -797,27 +789,9 @@ export default function DutyDashboardScreen({
             <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
           </View>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity
-            onPress={handleTriggerSos}
-            style={{
-              backgroundColor: '#DC2626',
-              paddingVertical: 7,
-              paddingHorizontal: 12,
-              borderRadius: 8,
-            }}
-            disabled={sendingSos}
-          >
-            {sendingSos ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '900' }}>🚨 SOS</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
-            <Text style={styles.logoutText}>Log out</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
+          <Text style={styles.logoutText}>Log out</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Tab Switcher */}
@@ -1453,6 +1427,8 @@ export default function DutyDashboardScreen({
         </ScrollView>
       </Modal>
     </ScrollView>
+    <SosButton onSend={handleTriggerSos} disabled={sendingSos} />
+    </View>
   );
 }
 
