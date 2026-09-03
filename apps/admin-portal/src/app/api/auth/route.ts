@@ -185,36 +185,33 @@ export async function POST(request: Request) {
     }
 
     if (parsed.device_uuid) {
-      if (user.role !== 'EMPLOYEE' && user.role !== 'MANAGER') {
-        return jsonError(
-          'Only Employee and Manager accounts can use the mobile app. Company owners sign in on the web portal.',
-          403,
-          'ROLE_NOT_ALLOWED'
-        );
+      // Employees and managers are device-bound (one phone per account). Owners may also sign in
+      // to the mobile owner app, but are NOT device-bound — they can use it from any device.
+      if (user.role === 'EMPLOYEE' || user.role === 'MANAGER') {
+        const existingDevice = await prisma.userDevice.findFirst({ where: { user_id: user.id, is_active: true } });
+        if (existingDevice && existingDevice.device_uuid !== parsed.device_uuid) {
+          return jsonError(
+            'This account is bound to another phone. Ask your manager or company owner to reset the device.',
+            403,
+            'DEVICE_MISMATCH'
+          );
+        }
+        await prisma.userDevice.upsert({
+          where: { user_id_device_uuid: { user_id: user.id, device_uuid: parsed.device_uuid } },
+          update: {
+            is_active: true,
+            device_model: parsed.device_model || 'Unknown',
+            os_version: parsed.os_version || 'Unknown',
+            last_seen_at: new Date(),
+          },
+          create: {
+            user_id: user.id,
+            device_uuid: parsed.device_uuid,
+            device_model: parsed.device_model || 'Unknown',
+            os_version: parsed.os_version || 'Unknown',
+          },
+        });
       }
-      const existingDevice = await prisma.userDevice.findFirst({ where: { user_id: user.id, is_active: true } });
-      if (existingDevice && existingDevice.device_uuid !== parsed.device_uuid) {
-        return jsonError(
-          'This account is bound to another phone. Ask your manager or company owner to reset the device.',
-          403,
-          'DEVICE_MISMATCH'
-        );
-      }
-      await prisma.userDevice.upsert({
-        where: { user_id_device_uuid: { user_id: user.id, device_uuid: parsed.device_uuid } },
-        update: {
-          is_active: true,
-          device_model: parsed.device_model || 'Unknown',
-          os_version: parsed.os_version || 'Unknown',
-          last_seen_at: new Date(),
-        },
-        create: {
-          user_id: user.id,
-          device_uuid: parsed.device_uuid,
-          device_model: parsed.device_model || 'Unknown',
-          os_version: parsed.os_version || 'Unknown',
-        },
-      });
     } else if (user.role !== 'OWNER') {
       return jsonError(
         'Only company owners can sign in to the web portal. Managers and employees use the Perzent mobile app.',
