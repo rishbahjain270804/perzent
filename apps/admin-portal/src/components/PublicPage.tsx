@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { PerzentLogo } from '@/components/PerzentLogo';
 import { BRAND } from '@perzent/shared-types';
 
 /** Shared shell for public information pages (privacy, terms, FAQ, support, account deletion). */
@@ -18,11 +19,7 @@ export function PublicPage({
     <div className="min-h-screen bg-white text-slate-900 font-sans antialiased">
       <header className="h-16 sm:h-18 px-4 sm:px-6 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
         <Link href="/" className="flex items-center gap-2.5">
-          <img
-            src="/perzent-logo-full.png"
-            alt="Perzent Official Logo"
-            className="h-10 sm:h-11 w-auto object-contain shrink-0"
-          />
+          <PerzentLogo markClassName="h-9 w-9" textClassName="text-lg" />
         </Link>
         <nav className="flex items-center gap-3 text-xs" aria-label="Header">
           <Link href={BRAND.faqPath} className="text-slate-600 hover:text-slate-900 hidden sm:inline">FAQ</Link>

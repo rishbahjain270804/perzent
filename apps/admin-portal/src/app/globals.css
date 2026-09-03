@@ -835,3 +835,11 @@ body {
 .animate-pulse-radar { animation: pulseRadar 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
 .animate-device-breathe { animation: floatDevice 7.5s ease-in-out infinite; }
 
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-card1,
+  .animate-float-card2,
+  .animate-float-card3,
+  .animate-pulse-radar,
+  .animate-device-breathe { animation: none; }
+}

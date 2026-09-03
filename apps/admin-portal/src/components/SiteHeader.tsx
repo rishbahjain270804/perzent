@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowRight, Smartphone, Menu, X } from 'lucide-react';
+import { PerzentLogo } from '@/components/PerzentLogo';
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -16,9 +17,9 @@ export function SiteHeader() {
       {/* Top Release Banner */}
       <div className="bg-slate-900 text-slate-100 text-[11px] sm:text-xs py-2 px-4 text-center font-medium flex items-center justify-center gap-2">
         <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] uppercase tracking-wide">
-          v1.3 Release
+          Free launch
         </span>
-        <span className="text-slate-200">Native Android Foreground GPS Service & Row-Level Security Integration</span>
+        <span className="text-slate-200">GPS-verified attendance & live tracking — free during launch, unlimited staff</span>
         <Link href="/download" className="underline font-bold text-emerald-400 hover:text-emerald-300 ml-1 transition">
           Get APK &rarr;
         </Link>
@@ -28,11 +29,7 @@ export function SiteHeader() {
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/95 border-b border-slate-200/80 px-4 sm:px-8 h-16 flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2 transition opacity-95 hover:opacity-100">
-            <img
-              src="/perzent-logo-full.png"
-              alt="Perzent Official Logo"
-              className="h-7 sm:h-8 w-auto object-contain shrink-0"
-            />
+            <PerzentLogo markClassName="h-7 w-7 sm:h-8 sm:w-8" textClassName="text-base sm:text-lg" />
           </Link>
         </div>
 
@@ -56,7 +53,7 @@ export function SiteHeader() {
                 : 'text-amber-700 font-bold hover:text-amber-800'
             }`}
           >
-            🔥 VIP Early Access
+            Early Access
           </Link>
           <Link
             href="/solutions"

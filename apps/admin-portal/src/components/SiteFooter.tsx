@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PerzentLogo } from '@/components/PerzentLogo';
 
 export function SiteFooter() {
   return (
@@ -7,11 +8,7 @@ export function SiteFooter() {
         {/* Brand Column */}
         <div className="md:col-span-2 space-y-4">
           <div className="flex items-center gap-3">
-            <img
-              src="/perzent-logo-full.png"
-              alt="Perzent Official Logo"
-              className="h-8 w-auto object-contain shrink-0"
-            />
+            <PerzentLogo markClassName="h-8 w-8" textClassName="text-lg" />
           </div>
           <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
             Real-time field workforce attendance and location intelligence platform. Eliminating proxy punches with hardware-bound GPS security.
