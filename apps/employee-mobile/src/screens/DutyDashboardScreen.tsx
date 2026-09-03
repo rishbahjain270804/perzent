@@ -764,7 +764,7 @@ export default function DutyDashboardScreen({
       : 'Break limit reached - please resume your shift'
     : shiftStatus === 'CHECKED_IN'
       ? `Shift duration • Auto check-out at ${formatClockTime(policy.auto_checkout_time)}`
-      : 'Shift duration (Server Synced)';
+      : 'Shift duration';
 
   const hasPermissionBlocker = Boolean(readiness?.blockers.some((item) => item.code === 'LOCATION_PERMISSION'));
   const onDutyCount = teamMembers.filter((m) => m.shift_status === 'CHECKED_IN').length;

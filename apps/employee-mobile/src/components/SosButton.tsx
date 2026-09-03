@@ -13,6 +13,15 @@ import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, Vibra
 
 const HOLD_MS = 1600;
 
+// Haptics are a nicety, never a requirement — a missing VIBRATE permission or absent motor must
+// never crash an emergency button. Every vibrate call goes through here.
+function buzz(pattern: number | number[]) {
+  try { Vibration.vibrate(pattern); } catch { /* no vibrator / no permission */ }
+}
+function stopBuzz() {
+  try { Vibration.cancel(); } catch { /* ignore */ }
+}
+
 type Phase = 'idle' | 'holding' | 'sending' | 'sent';
 
 export function SosButton({ onSend, disabled }: { onSend: () => Promise<void>; disabled?: boolean }) {
@@ -45,14 +54,14 @@ export function SosButton({ onSend, disabled }: { onSend: () => Promise<void>; d
   const reset = () => {
     if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
     if (buzzTimer.current) { clearInterval(buzzTimer.current); buzzTimer.current = null; }
-    Vibration.cancel();
+    stopBuzz();
     Animated.timing(progress, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   };
 
   const fire = async () => {
     completed.current = true;
     if (buzzTimer.current) { clearInterval(buzzTimer.current); buzzTimer.current = null; }
-    Vibration.vibrate([0, 80, 60, 160]);
+    buzz([0, 80, 60, 160]);
     setPhase('sending');
     try {
       await onSend();
@@ -70,9 +79,9 @@ export function SosButton({ onSend, disabled }: { onSend: () => Promise<void>; d
     completed.current = false;
     setPhase('holding');
     setHint(false);
-    Vibration.vibrate(35);
+    buzz(35);
     // Escalating buzz while the ring fills, so a held press clearly feels different from a tap.
-    buzzTimer.current = setInterval(() => Vibration.vibrate(25), 320);
+    buzzTimer.current = setInterval(() => buzz(25), 320);
     Animated.timing(progress, { toValue: 1, duration: HOLD_MS, easing: Easing.linear, useNativeDriver: false }).start();
     holdTimer.current = setTimeout(fire, HOLD_MS);
   };
