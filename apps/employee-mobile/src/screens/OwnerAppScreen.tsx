@@ -4,9 +4,11 @@ import {
   Alert,
   FlatList,
   Linking,
+  Modal,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -80,6 +82,10 @@ export default function OwnerAppScreen({ session, onLogout }: { session: any; on
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ full_name: '', phone: '', password: '', designation: '' });
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState('');
 
   const loadTeam = useCallback(async (bg = false) => {
     if (!bg) setLoading(true);
@@ -144,6 +150,28 @@ export default function OwnerAppScreen({ session, onLogout }: { session: any; on
       .finally(() => setBusyId(''));
   };
 
+  const submitAdd = () => {
+    if (!addForm.full_name.trim() || !addForm.phone.trim() || addForm.password.length < 6) {
+      setAddErr('Name, phone, and a password of at least 6 characters are required.');
+      return;
+    }
+    setAdding(true);
+    setAddErr('');
+    EmployeeApi.addEmployee(session, {
+      full_name: addForm.full_name.trim(),
+      phone: addForm.phone.trim(),
+      password: addForm.password,
+      designation: addForm.designation.trim() || undefined,
+    })
+      .then(() => {
+        setAddOpen(false);
+        setAddForm({ full_name: '', phone: '', password: '', designation: '' });
+        loadTeam();
+      })
+      .catch((e: any) => setAddErr(e?.message || 'Could not add the employee.'))
+      .finally(() => setAdding(false));
+  };
+
   return (
     <View style={styles.root}>
       {/* Header */}
@@ -179,7 +207,13 @@ export default function OwnerAppScreen({ session, onLogout }: { session: any; on
             data={team}
             keyExtractor={(m) => m.user_id}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#16A34A']} />}
-            ListEmptyComponent={<Empty icon="users" title="No employees" text={loading ? 'Loading…' : 'Add staff from the web dashboard.'} />}
+            ListHeaderComponent={
+              <TouchableOpacity style={styles.addBtn} onPress={() => { setAddErr(''); setAddOpen(true); }}>
+                <Icon name="users" size={16} color="#FFFFFF" />
+                <Text style={styles.addBtnText}>Add team member</Text>
+              </TouchableOpacity>
+            }
+            ListEmptyComponent={<Empty icon="users" title="No employees" text={loading ? 'Loading…' : 'Tap “Add team member” to add your first employee.'} />}
             contentContainerStyle={styles.list}
             renderItem={({ item: m }) => (
               <View style={styles.card}>
@@ -297,6 +331,25 @@ export default function OwnerAppScreen({ session, onLogout }: { session: any; on
       {loading && tab === 'MAP' && (
         <View style={styles.loadOverlay}><ActivityIndicator color="#16A34A" /></View>
       )}
+
+      {/* Add employee */}
+      <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => !adding && setAddOpen(false)}>
+        <View style={styles.mBackdrop}>
+          <View style={styles.mCard}>
+            <Text style={styles.mTitle}>Add team member</Text>
+            <Text style={styles.mSub}>They sign in on this app with the phone and password you set.</Text>
+            <TextInput style={styles.input} placeholder="Full name" placeholderTextColor="#94A3B8" value={addForm.full_name} onChangeText={(t) => setAddForm((f) => ({ ...f, full_name: t }))} />
+            <TextInput style={styles.input} placeholder="Phone (e.g. +91 98765 43210)" placeholderTextColor="#94A3B8" keyboardType="phone-pad" value={addForm.phone} onChangeText={(t) => setAddForm((f) => ({ ...f, phone: t }))} />
+            <TextInput style={styles.input} placeholder="Temporary password (min 6)" placeholderTextColor="#94A3B8" secureTextEntry value={addForm.password} onChangeText={(t) => setAddForm((f) => ({ ...f, password: t }))} />
+            <TextInput style={styles.input} placeholder="Designation (optional)" placeholderTextColor="#94A3B8" value={addForm.designation} onChangeText={(t) => setAddForm((f) => ({ ...f, designation: t }))} />
+            {!!addErr && <Text style={styles.mErr}>{addErr}</Text>}
+            <View style={styles.actions}>
+              <TouchableOpacity disabled={adding} onPress={() => setAddOpen(false)} style={[styles.btn, styles.btnGrey]}><Text style={[styles.btnText, { color: '#334155' }]}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity disabled={adding} onPress={submitAdd} style={[styles.btn, styles.btnGreen]}><Text style={styles.btnText}>{adding ? 'Adding…' : 'Add'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -346,4 +399,12 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 14, fontWeight: '700', color: '#334155', marginTop: 4 },
   emptyText: { fontSize: 12, color: '#94A3B8', textAlign: 'center' },
   loadOverlay: { position: 'absolute', top: 120, alignSelf: 'center' },
+  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', paddingVertical: 11, borderRadius: 12, marginBottom: 8 },
+  addBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  mBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
+  mCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 34, gap: 10 },
+  mTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  mSub: { fontSize: 12, color: '#64748B', marginTop: -4, marginBottom: 4 },
+  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: '#0F172A' },
+  mErr: { color: '#DC2626', fontSize: 12 },
 });
