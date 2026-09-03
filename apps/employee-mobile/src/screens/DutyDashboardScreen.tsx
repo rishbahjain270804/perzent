@@ -27,7 +27,7 @@ import { BRAND } from '@perzent/shared-types';
 import { SosButton } from '../components/SosButton';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
-type ManagerTab = 'DUTY' | 'TEAM' | 'LEAVE';
+type ManagerTab = 'DUTY' | 'ATTENDANCE' | 'TEAM' | 'LEAVE';
 type PendingAction = 'CHECK_IN' | 'START_BREAK' | 'RESUME' | 'CHECK_OUT' | null;
 type ShiftPolicy = { timezone: string; auto_checkout_time: string; max_break_minutes: number };
 
@@ -54,6 +54,13 @@ const formatDuration = (totalSeconds: number) => {
 };
 
 /** "23:40" -> "11:40 PM" */
+const formatWorkDate = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+};
+const formatIsoTime = (iso: string) => {
+  try { return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); } catch { return '—'; }
+};
 const formatClockTime = (hhmm: string) => {
   const [h, m] = String(hhmm || '').split(':').map((part) => parseInt(part, 10));
   if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
@@ -340,6 +347,25 @@ export default function DutyDashboardScreen({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [session, shiftStatus]);
+
+  // Monthly attendance (own record) — loaded when the Attendance tab opens.
+  const [attendance, setAttendance] = useState<any>(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const loadAttendance = useCallback(async () => {
+    if (!session) return;
+    setAttendanceLoading(true);
+    try {
+      const data = await EmployeeApi.shiftHistory(session, 31);
+      setAttendance(data);
+    } catch {
+      /* keep the last data; the card shows an empty state */
+    } finally {
+      setAttendanceLoading(false);
+    }
+  }, [session]);
+  useEffect(() => {
+    if (activeTab === 'ATTENDANCE') loadAttendance();
+  }, [activeTab, loadAttendance]);
 
   // AppState listener: re-sync attendance, reconcile the native service and re-inspect on resume.
   useEffect(() => {
@@ -803,6 +829,12 @@ export default function DutyDashboardScreen({
           <Text style={[styles.tabText, activeTab === 'DUTY' && styles.tabTextActive]}>My Shift</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'ATTENDANCE' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('ATTENDANCE')}
+        >
+          <Text style={[styles.tabText, activeTab === 'ATTENDANCE' && styles.tabTextActive]}>Attendance</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.tabButton, activeTab === 'LEAVE' && styles.tabButtonActive]}
           onPress={() => setActiveTab('LEAVE')}
         >
@@ -1142,6 +1174,65 @@ export default function DutyDashboardScreen({
       )}
 
       {/* --- TAB 3: MY LEAVES --- */}
+      {/* --- TAB: MY ATTENDANCE (last 30 days) --- */}
+      {activeTab === 'ATTENDANCE' && (
+        <View>
+          <View style={styles.historyCard}>
+            <Text style={styles.historyTitle}>Last 30 days</Text>
+            <View style={styles.historyRow}>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{Math.floor((attendance?.totals?.net_worked_minutes || 0) / 60)}h {(attendance?.totals?.net_worked_minutes || 0) % 60}m</Text>
+                <Text style={styles.historyLabel}>worked</Text>
+              </View>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{attendance?.totals?.shifts || 0}</Text>
+                <Text style={styles.historyLabel}>shifts</Text>
+              </View>
+              <View style={styles.historyStat}>
+                <Text style={styles.historyValue}>{Math.floor((attendance?.totals?.total_break_minutes || 0) / 60)}h {(attendance?.totals?.total_break_minutes || 0) % 60}m</Text>
+                <Text style={styles.historyLabel}>breaks</Text>
+              </View>
+            </View>
+          </View>
+
+          {attendanceLoading && !attendance ? (
+            <Text style={styles.attendanceEmpty}>Loading your attendance…</Text>
+          ) : !attendance?.shifts?.length ? (
+            <Text style={styles.attendanceEmpty}>No shifts recorded in the last 30 days.</Text>
+          ) : (
+            <View style={styles.attendanceList}>
+              {attendance.shifts.map((shift: any) => (
+                <View key={shift.id} style={styles.attendanceRow}>
+                  <View style={styles.attendanceDateCol}>
+                    <Text style={styles.attendanceDate}>{formatWorkDate(shift.work_date)}</Text>
+                    {shift.is_open ? (
+                      <Text style={styles.attendanceOpen}>On duty now</Text>
+                    ) : (
+                      <Text style={styles.attendanceTimes}>
+                        {formatIsoTime(shift.punch_in_time)} – {shift.punch_out_time ? formatIsoTime(shift.punch_out_time) : '—'}
+                      </Text>
+                    )}
+                    {(shift.auto_checked_out || shift.corrected) && (
+                      <Text style={styles.attendanceFlag}>
+                        {shift.auto_checked_out ? 'Auto checked-out' : ''}
+                        {shift.auto_checked_out && shift.corrected ? ' • ' : ''}
+                        {shift.corrected ? 'Adjusted by manager' : ''}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.attendanceHoursCol}>
+                    <Text style={styles.attendanceHours}>{Math.floor(shift.net_worked_minutes / 60)}h {shift.net_worked_minutes % 60}m</Text>
+                    {shift.total_break_minutes > 0 && (
+                      <Text style={styles.attendanceBreak}>{shift.total_break_minutes}m break</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       {activeTab === 'LEAVE' && (
         <View style={styles.teamContainer}>
           <TouchableOpacity style={styles.addEmployeeTopButton} onPress={() => setLeaveModalVisible(true)}>
@@ -1576,6 +1667,17 @@ const styles = StyleSheet.create({
   historyValue: { color: '#166534', fontSize: 18, fontWeight: '800' },
   historyLabel: { color: '#64748B', fontSize: 11, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   historyNote: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 10 },
+  attendanceEmpty: { color: '#64748B', fontSize: 13, textAlign: 'center', marginTop: 24 },
+  attendanceList: { marginTop: 14, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
+  attendanceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  attendanceDateCol: { flex: 1, paddingRight: 12 },
+  attendanceDate: { color: '#0F172A', fontSize: 14, fontWeight: '700' },
+  attendanceTimes: { color: '#64748B', fontSize: 12, marginTop: 2 },
+  attendanceOpen: { color: '#166534', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  attendanceFlag: { color: '#B45309', fontSize: 11, marginTop: 3 },
+  attendanceHoursCol: { alignItems: 'flex-end' },
+  attendanceHours: { color: '#166534', fontSize: 15, fontWeight: '800' },
+  attendanceBreak: { color: '#94A3B8', fontSize: 11, marginTop: 2 },
   helpCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginTop: 14, borderWidth: 1, borderColor: '#E2E8F0' },
   helpTitle: { color: '#0F172A', fontSize: 14, fontWeight: '800' },
   helpText: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 4 },
