@@ -94,6 +94,7 @@ model Company {
   departments                Department[]
   sites                      GeofenceSite[]
   leave_requests             LeaveRequest[]
+  leave_types                LeaveTypeConfig[]
   payments                   PaymentTransaction[]
   sos_alerts                 SosAlert[]
 }
@@ -162,6 +163,7 @@ model User {
   sessions      Session[]
   password_resets PasswordReset[]
   leave_requests LeaveRequest[] @relation("EmployeeLeaves")
+  leave_balances LeaveBalance[]
   approved_leaves LeaveRequest[] @relation("ApprovedLeaves")
   sos_alerts     SosAlert[]     @relation("EmployeeSosAlerts")
   resolved_sos   SosAlert[]     @relation("ResolvedSosAlerts")
@@ -349,6 +351,7 @@ model LeaveRequest {
   company_id     String
   user_id        String
   leave_type     LeaveType   @default(CASUAL)
+  leave_type_id  String?
   start_date     DateTime    @db.Date
   end_date       DateTime    @db.Date
   total_days     Float       @default(1.0)
@@ -363,6 +366,7 @@ model LeaveRequest {
   company        Company     @relation(fields: [company_id], references: [id], onDelete: Cascade)
   user           User        @relation("EmployeeLeaves", fields: [user_id], references: [id], onDelete: Cascade)
   reviewer       User?       @relation("ApprovedLeaves", fields: [reviewed_by_id], references: [id], onDelete: SetNull)
+  leave_type_ref LeaveTypeConfig? @relation(fields: [leave_type_id], references: [id], onDelete: SetNull)
 
   @@index([company_id, status, start_date])
   @@index([user_id, status])
@@ -487,4 +491,38 @@ model WaitlistEntry {
 
   @@index([email])
   @@index([created_at])
+}
+
+model LeaveTypeConfig {
+  id               String   @id @default(uuid())
+  company_id       String
+  name             String
+  code             String
+  is_paid          Boolean  @default(true)
+  annual_allowance Float    @default(0)
+  is_active        Boolean  @default(true)
+  sort_order       Int      @default(0)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  company  Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  balances LeaveBalance[]
+  requests LeaveRequest[]
+
+  @@unique([company_id, code])
+  @@index([company_id, is_active])
+}
+
+model LeaveBalance {
+  id            String   @id @default(uuid())
+  user_id       String
+  leave_type_id String
+  balance       Float    @default(0)
+  updated_at    DateTime @updatedAt
+
+  user       User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  leave_type LeaveTypeConfig @relation(fields: [leave_type_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, leave_type_id])
+  @@index([leave_type_id])
 }
