@@ -21,6 +21,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -71,6 +74,12 @@ class PerzentLocationService : Service() {
         const val NOTIFICATION_ID = 99881
         const val ALERT_CHANNEL_ID = "perzent_shift_alerts_v1"
         const val ALERT_NOTIFICATION_ID = 99882
+        const val SOS_NOTIFICATION_ID = 99883
+        // Power-button panic trigger: N screen on/off toggles (each power press toggles the screen)
+        // within the window fires an SOS. Works while the tracking service is running (on shift).
+        const val SOS_PRESS_COUNT = 3
+        const val SOS_PRESS_WINDOW_MS = 3_000L
+        const val SOS_COOLDOWN_MS = 30_000L
         const val PREFS_NAME = "perzent_service_prefs"
         const val KEY_TOKEN = "auth_token"
         const val KEY_USER_ID = "user_id"
@@ -232,6 +241,9 @@ class PerzentLocationService : Service() {
     private var locationManager: LocationManager? = null
     private var systemLocationListener: LocationListener? = null
     private var gpsStateReceiver: BroadcastReceiver? = null
+    private var powerButtonReceiver: BroadcastReceiver? = null
+    private val powerPressTimes = ArrayDeque<Long>()
+    @Volatile private var lastSosElapsedMs = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile private var token: String = ""
@@ -321,6 +333,7 @@ class PerzentLocationService : Service() {
 
         acquireWakeLock()
         registerGpsStateReceiver()
+        registerPowerButtonReceiver()
         gpsProviderOff = !DeviceStatus.locationServicesEnabled(this)
         startLocationUpdates()
         mainHandler.removeCallbacks(notificationRefresh)
@@ -506,6 +519,124 @@ class PerzentLocationService : Service() {
             Log.e(TAG, "Error releasing wake lock", e)
         }
         wakeLock = null
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Power-button panic SOS
+    // ---------------------------------------------------------------------------------------------
+    private fun registerPowerButtonReceiver() {
+        if (powerButtonReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (shuttingDown) return
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF -> onPowerToggle()
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        try {
+            registerReceiver(receiver, filter)
+            powerButtonReceiver = receiver
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register power-button receiver: ${e.message}")
+        }
+    }
+
+    private fun unregisterPowerButtonReceiver() {
+        val receiver = powerButtonReceiver ?: return
+        powerButtonReceiver = null
+        try { unregisterReceiver(receiver) } catch (e: Exception) { Log.w(TAG, "Error unregistering power receiver: ${e.message}") }
+        powerPressTimes.clear()
+    }
+
+    /** Each screen on/off toggle counts as a power press; N within the window fires an SOS. */
+    private fun onPowerToggle() {
+        val now = SystemClock.elapsedRealtime()
+        powerPressTimes.addLast(now)
+        while (powerPressTimes.isNotEmpty() && now - powerPressTimes.first() > SOS_PRESS_WINDOW_MS) {
+            powerPressTimes.removeFirst()
+        }
+        if (powerPressTimes.size >= SOS_PRESS_COUNT && now - lastSosElapsedMs > SOS_COOLDOWN_MS) {
+            lastSosElapsedMs = now
+            powerPressTimes.clear()
+            triggerPowerButtonSos()
+        }
+    }
+
+    private fun bestKnownLocation(): Location? {
+        lastAcceptedLocation?.let { return it }
+        if (!DeviceStatus.hasFineLocationPermission(this)) return null
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) { null }
+    }
+
+    private fun triggerPowerButtonSos() {
+        vibrateSos()
+        val loc = bestKnownLocation()
+        val currentToken = token
+        val currentBase = apiBase
+        if (currentToken.isEmpty()) { showSosNotification(false); return }
+        if (uploadExecutor.isShutdown) { showSosNotification(false); return }
+        try {
+            uploadExecutor.execute {
+                val body = JSONObject().apply {
+                    put("latitude", loc?.latitude ?: 0.0)
+                    put("longitude", loc?.longitude ?: 0.0)
+                    put("accuracy", if (loc != null && loc.hasAccuracy()) loc.accuracy.toDouble() else 100.0)
+                    put("note", "POWER BUTTON SOS")
+                }
+                val request = Request.Builder()
+                    .url("$currentBase/api/sos")
+                    .post(body.toString().toRequestBody(jsonMediaType))
+                    .addHeader("Authorization", "Bearer $currentToken")
+                    .build()
+                val ok = try {
+                    httpClient.newCall(request).execute().use { it.isSuccessful }
+                } catch (e: Exception) { Log.e(TAG, "Power SOS failed", e); false }
+                mainHandler.post { showSosNotification(ok) }
+            }
+        } catch (e: RejectedExecutionException) {
+            showSosNotification(false)
+        }
+    }
+
+    private fun vibrateSos() {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            val pattern = longArrayOf(0, 120, 80, 200)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                @Suppress("DEPRECATION") vibrator?.vibrate(pattern, -1)
+            }
+        } catch (e: Exception) { /* no vibrator / no permission */ }
+    }
+
+    private fun showSosNotification(sent: Boolean) {
+        try {
+            val notification = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_perzent)
+                .setContentTitle(if (sent) "🚨 SOS alert sent" else "SOS could not be sent")
+                .setContentText(if (sent) "Your live location was sent to your employer." else "Check your internet and try again, or use the SOS button in the app.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ERROR)
+                .setAutoCancel(true)
+                .build()
+            getSystemService(NotificationManager::class.java)?.notify(SOS_NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show SOS notification", e)
+        }
     }
 
     private fun registerGpsStateReceiver() {
@@ -993,6 +1124,7 @@ class PerzentLocationService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         stopLocationUpdates()
         unregisterGpsReceiver()
+        unregisterPowerButtonReceiver()
         releaseWakeLock()
 
         val finalToken = token
@@ -1052,6 +1184,7 @@ class PerzentLocationService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         stopLocationUpdates()
         unregisterGpsReceiver()
+        unregisterPowerButtonReceiver()
         releaseWakeLock()
 
         val p = prefs(this)

@@ -107,6 +107,7 @@ export function SideMenu({
               <MenuRow icon="download" label="Check for app updates" onPress={() => AutoUpdateService.manualCheck()} />
               <MenuRow icon="bell" label="Notification settings" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
               <MenuRow icon="mapPin" label="Location & permissions" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
+              <MenuRow icon="settings" label="Battery optimization" sub="Keep tracking alive in the background" onPress={() => Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => Linking.openSettings().catch(() => undefined))} />
             </>
           )}
 

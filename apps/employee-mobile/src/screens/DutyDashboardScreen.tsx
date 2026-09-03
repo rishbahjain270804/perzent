@@ -26,6 +26,8 @@ import { ReminderService } from '../services/ReminderService';
 import { BRAND } from '@perzent/shared-types';
 import { SosButton } from '../components/SosButton';
 import { SideMenu, HamburgerIcon } from '../components/SideMenu';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Platform } from 'react-native';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'ATTENDANCE' | 'TEAM' | 'LEAVE';
@@ -137,6 +139,7 @@ export default function DutyDashboardScreen({
   const [leaveType, setLeaveType] = useState<'PAID' | 'SICK' | 'CASUAL' | 'UNPAID'>('PAID');
   const [leaveStartDate, setLeaveStartDate] = useState('');
   const [leaveEndDate, setLeaveEndDate] = useState('');
+  const [datePicker, setDatePicker] = useState<null | 'START' | 'END'>(null);
   const [leaveReason, setLeaveReason] = useState('');
   const [submittingLeave, setSubmittingLeave] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
@@ -733,6 +736,31 @@ export default function DutyDashboardScreen({
     }
   }, [activeTab, loadLeaves]);
 
+  const toYmd = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const onPickDate = (which: 'START' | 'END', _event: any, selected?: Date) => {
+    // Android fires with the tapped date (or undefined on dismiss); close then apply.
+    setDatePicker(null);
+    if (!selected) return;
+    const ymd = toYmd(selected);
+    if (which === 'START') {
+      setLeaveStartDate(ymd);
+      // keep end on/after start
+      if (leaveEndDate && leaveEndDate < ymd) setLeaveEndDate(ymd);
+    } else {
+      setLeaveEndDate(ymd);
+    }
+  };
+  const prettyDate = (ymd: string) => {
+    if (!ymd) return '';
+    const d = new Date(ymd + 'T00:00:00');
+    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
   const handleCreateLeave = async () => {
     if (!leaveStartDate || !leaveEndDate || !leaveReason.trim()) {
       Alert.alert('Validation Error', 'Please enter start date, end date, and a reason.');
@@ -1307,20 +1335,33 @@ export default function DutyDashboardScreen({
               ))}
             </View>
 
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Start Date (YYYY-MM-DD)"
-              placeholderTextColor="#94A3B8"
-              value={leaveStartDate}
-              onChangeText={setLeaveStartDate}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="End Date (YYYY-MM-DD)"
-              placeholderTextColor="#94A3B8"
-              value={leaveEndDate}
-              onChangeText={setLeaveEndDate}
-            />
+            <View style={styles.dateRow}>
+              <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('START')}>
+                <Text style={styles.dateFieldLabel}>From</Text>
+                <Text style={[styles.dateFieldValue, !leaveStartDate && styles.dateFieldPlaceholder]}>
+                  {leaveStartDate ? prettyDate(leaveStartDate) : 'Select date'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('END')}>
+                <Text style={styles.dateFieldLabel}>To</Text>
+                <Text style={[styles.dateFieldValue, !leaveEndDate && styles.dateFieldPlaceholder]}>
+                  {leaveEndDate ? prettyDate(leaveEndDate) : 'Select date'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {datePicker && (
+              <DateTimePicker
+                mode="date"
+                display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
+                value={
+                  datePicker === 'START'
+                    ? (leaveStartDate ? new Date(leaveStartDate + 'T00:00:00') : new Date())
+                    : (leaveEndDate ? new Date(leaveEndDate + 'T00:00:00') : (leaveStartDate ? new Date(leaveStartDate + 'T00:00:00') : new Date()))
+                }
+                minimumDate={datePicker === 'END' && leaveStartDate ? new Date(leaveStartDate + 'T00:00:00') : undefined}
+                onChange={(e, d) => onPickDate(datePicker, e, d)}
+              />
+            )}
             <TextInput
               style={[styles.modalInput, { height: 70, textAlignVertical: 'top' }]}
               placeholder="Reason for leave"
@@ -1630,6 +1671,11 @@ const styles = StyleSheet.create({
   historyValue: { color: '#166534', fontSize: 18, fontWeight: '800' },
   historyLabel: { color: '#64748B', fontSize: 11, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   historyNote: { color: '#475569', fontSize: 12, lineHeight: 18, marginTop: 10 },
+  dateRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  dateField: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#FFFFFF' },
+  dateFieldLabel: { fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5 },
+  dateFieldValue: { fontSize: 14, color: '#0F172A', fontWeight: '600', marginTop: 3 },
+  dateFieldPlaceholder: { color: '#94A3B8', fontWeight: '400' },
   attendanceEmpty: { color: '#64748B', fontSize: 13, textAlign: 'center', marginTop: 24 },
   attendanceList: { marginTop: 14, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
   attendanceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
