@@ -74,6 +74,8 @@ export default function DashboardOverviewPage() {
   const onBreak = team.filter((m) => m.shift_status === 'ON_BREAK').length;
   const tamperAlerts = team.filter((m) => m.has_tamper_alert).length;
   const disconnected = team.filter((m) => isOnShift(m) && freshnessOf(m, now) === 'disconnected').length;
+  // A disconnected on-shift member also carries has_tamper_alert, so count members, not flags.
+  const alertCount = team.filter((m) => m.has_tamper_alert || (isOnShift(m) && freshnessOf(m, now) === 'disconnected')).length;
   const today = todayInTimezone(timeZone);
 
   const trailHref = (member: LiveMember) => `/dashboard/live-map?user_id=${encodeURIComponent(member.user_id)}&date=${today}`;
@@ -130,9 +132,9 @@ export default function DashboardOverviewPage() {
         <StatCard label="On break" value={onBreak} icon={Coffee} tone="warning" />
         <StatCard
           label="Alerts"
-          value={tamperAlerts + disconnected}
+          value={alertCount}
           icon={AlertTriangle}
-          tone={tamperAlerts + disconnected > 0 ? 'danger' : 'default'}
+          tone={alertCount > 0 ? 'danger' : 'default'}
           hint={disconnected > 0 ? `${disconnected} GPS/Net lost` : undefined}
         />
       </div>

@@ -4,12 +4,12 @@ import { prisma } from '@perzent/database';
 import { KioskPunchSchema } from '@perzent/shared-types';
 import { checkIn, checkOut, isOpen, resolveCurrentAttendance } from '@/lib/attendance';
 import { authErrorResponse, jsonError, requireSession } from '@/lib/auth';
+import { phoneVariants } from '@/lib/phone';
 import { getCompanyPolicy } from '@/lib/policy';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-const normalizePhone = (value: string) => value.replace(/[\s()-]/g, '');
 
 /**
  * Kiosk terminal punch. The terminal itself must be signed in as the company owner/manager
@@ -22,13 +22,12 @@ export async function POST(request: Request) {
     const blocked = rateLimit(`kiosk:${session.companyId}`, 60, 60 * 1000);
     if (blocked) return jsonError(`Too many punches. Try again in ${blocked}s.`, 429, 'RATE_LIMITED');
 
-    const phone = normalizePhone(body.phone);
     const user = await prisma.user.findFirst({
       where: {
         company_id: session.companyId,
         role: { in: ['EMPLOYEE', 'MANAGER'] },
         status: 'ACTIVE',
-        OR: [{ phone }, { phone: body.phone.trim() }],
+        phone: { in: phoneVariants(body.phone) },
         ...(session.role === 'MANAGER' ? { manager_id: session.userId } : {}),
       },
     });
@@ -67,7 +66,7 @@ export async function POST(request: Request) {
       action: 'CHECKED_OUT',
       user_name: user.full_name,
       punch_out_time: updated.punch_out_time?.toISOString(),
-      worked_hours: hours.toFixed(2),
+      worked_hours: Number(hours.toFixed(2)),
       message: `Goodbye, ${user.full_name}. Net worked today: ${hours.toFixed(1)} h.`,
     });
   } catch (error) {

@@ -260,7 +260,7 @@ export class EmployeeApi {
 
   // Leave Management methods
   static getLeaves(session: any) {
-    return request(session, '/api/leave', 'GET', undefined, 'Could not load leave requests');
+    return request(session, '/api/leave?mine=1', 'GET', undefined, 'Could not load leave requests');
   }
 
   static requestLeave(session: any, data: { leave_type: 'PAID' | 'SICK' | 'CASUAL' | 'UNPAID'; start_date: string; end_date: string; reason: string }) {

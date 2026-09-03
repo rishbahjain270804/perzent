@@ -320,7 +320,7 @@ export default function EmployeesPage() {
           role: editForm.role,
           manager_id: editForm.manager_id || null,
           department_id: editForm.department_id || null,
-          email: editForm.email.trim() || undefined,
+          email: editForm.email.trim() || null,
         },
       });
       setEditTarget(null);

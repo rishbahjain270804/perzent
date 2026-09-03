@@ -20,8 +20,11 @@ export async function GET(request: Request) {
       return jsonError('Invalid status filter', 400, 'VALIDATION');
     }
     const status = statusParam as LeaveStatus | null;
+    // ?mine=1 — the caller wants their own requests and balances regardless of role (the app's
+    // My Leaves tab; managers otherwise get their team's requests and no balances).
+    const mine = new URL(request.url).searchParams.get('mine') === '1';
 
-    if (session.role === 'EMPLOYEE') {
+    if (session.role === 'EMPLOYEE' || mine) {
       const [requests, user] = await Promise.all([
         prisma.leaveRequest.findMany({ where: { user_id: session.userId, ...(status ? { status } : {}) }, orderBy: { created_at: 'desc' } }),
         prisma.user.findUniqueOrThrow({
