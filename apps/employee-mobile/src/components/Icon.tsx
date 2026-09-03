@@ -10,7 +10,8 @@ import Svg, { Circle, Line, Path, Polyline, Rect } from 'react-native-svg';
 export type IconName =
   | 'user' | 'settings' | 'help' | 'info' | 'logout'
   | 'chevronRight' | 'chevronLeft' | 'close'
-  | 'bell' | 'mapPin' | 'download' | 'globe' | 'lock' | 'fileText' | 'trash' | 'alert';
+  | 'bell' | 'mapPin' | 'download' | 'globe' | 'lock' | 'fileText' | 'trash' | 'alert'
+  | 'users' | 'calendar' | 'check' | 'x' | 'refresh' | 'phone';
 
 export function Icon({ name, size = 22, color = '#0F172A', strokeWidth = 2 }: {
   name: IconName;
@@ -92,6 +93,30 @@ export function Icon({ name, size = 22, color = '#0F172A', strokeWidth = 2 }: {
         <Line x1="12" y1="9" x2="12" y2="14" {...p} />
         <Line x1="12" y1="17.5" x2="12" y2="17.6" {...p} />
       </>)}
+      {name === 'users' && (<>
+        <Path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" {...p} />
+        <Circle cx="9" cy="7" r="3.2" {...p} />
+        <Path d="M22 21v-2a4 4 0 0 0-3-3.87" {...p} />
+        <Path d="M16 3.13a4 4 0 0 1 0 7.75" {...p} />
+      </>)}
+      {name === 'calendar' && (<>
+        <Rect x="3" y="4.5" width="18" height="16" rx="2" {...p} />
+        <Line x1="3" y1="9" x2="21" y2="9" {...p} />
+        <Line x1="8" y1="2.5" x2="8" y2="6" {...p} />
+        <Line x1="16" y1="2.5" x2="16" y2="6" {...p} />
+      </>)}
+      {name === 'check' && <Polyline points="4 12.5 9.5 18 20 6" {...p} />}
+      {name === 'x' && (<>
+        <Line x1="6" y1="6" x2="18" y2="18" {...p} />
+        <Line x1="18" y1="6" x2="6" y2="18" {...p} />
+      </>)}
+      {name === 'refresh' && (<>
+        <Path d="M21 12a9 9 0 1 1-3-6.7" {...p} />
+        <Polyline points="21 3 21 8 16 8" {...p} />
+      </>)}
+      {name === 'phone' && (
+        <Path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.4-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" {...p} />
+      )}
     </Svg>
   );
 }

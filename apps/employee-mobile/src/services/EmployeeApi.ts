@@ -324,4 +324,26 @@ export class EmployeeApi {
   static getActiveSos(session: any) {
     return request(session, '/api/sos', 'GET', undefined, 'Could not load active SOS alert');
   }
+
+  // ── Owner app (OWNER role) ────────────────────────────────────────────────
+  /** Whole-company live team (owner scope returns everyone). */
+  static ownerTeam(session: any) {
+    return request(session, API_CONFIG.ENDPOINTS.LIVE_TEAM, 'GET', undefined, 'Could not load your team');
+  }
+  static ownerSos(session: any, activeOnly = false) {
+    return request(session, `/api/sos${activeOnly ? '?status=ACTIVE' : ''}`, 'GET', undefined, 'Could not load SOS alerts');
+  }
+  static resolveSos(session: any, id: string, action: 'RESOLVE' | 'DISMISS', note?: string) {
+    return request(session, '/api/sos', 'PATCH', { id, action, ...(note ? { note } : {}) }, 'Could not update the alert');
+  }
+  /** Leave requests awaiting the owner (no ?mine → returns the company's requests). */
+  static ownerLeaves(session: any, status?: string) {
+    return request(session, `/api/leave${status ? `?status=${status}` : ''}`, 'GET', undefined, 'Could not load leave requests');
+  }
+  static reviewLeave(session: any, id: string, action: 'APPROVE' | 'REJECT', review_notes?: string) {
+    return request(session, '/api/leave', 'PATCH', { id, action, ...(review_notes ? { review_notes } : {}) }, 'Could not review the leave request');
+  }
+  static ownerAttendance(session: any, from: string, to: string) {
+    return request(session, `/api/attendance?from=${from}&to=${to}`, 'GET', undefined, 'Could not load attendance');
+  }
 }

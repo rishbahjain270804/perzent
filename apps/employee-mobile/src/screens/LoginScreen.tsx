@@ -57,15 +57,16 @@ export default function LoginScreen({
         <Text style={styles.subtitle}>Sign in to start or manage your work shift.</Text>
 
         <View style={styles.formCard}>
-          <Text style={styles.label}>Registered phone number</Text>
+          <Text style={styles.label}>Phone number or email</Text>
           <TextInput
             style={styles.input}
             value={phone}
             onChangeText={setPhone}
-            placeholder="+91 98765 43210"
+            placeholder="Phone or email"
             placeholderTextColor="#94A3B8"
-            keyboardType="phone-pad"
-            autoComplete="tel"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
           />
 
           <Text style={styles.label}>Password</Text>

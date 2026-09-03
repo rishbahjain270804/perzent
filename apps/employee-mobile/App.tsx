@@ -17,6 +17,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
 import LoginScreen from './src/screens/LoginScreen';
 import DutyDashboardScreen from './src/screens/DutyDashboardScreen';
+import OwnerAppScreen from './src/screens/OwnerAppScreen';
 import { AnnouncementBanner, CrashScreen, MaintenanceScreen, OfflineScreen, ServerUnreachableScreen } from './src/screens/StatusScreens';
 import { DeviceBindingService } from './src/services/DeviceBindingService';
 import { EmployeeApi } from './src/services/EmployeeApi';
@@ -178,20 +179,31 @@ export default function App() {
             <>
               {remote.announcement && <AnnouncementBanner text={remote.announcement.text} level={remote.announcement.level} />}
               {session ? (
-                <DutyDashboardScreen
-                  session={session}
-                  deviceInfo={deviceInfo}
-                  onShiftStatus={(onDuty) => {
-                    onDutyRef.current = onDuty;
-                  }}
-                  onLogout={async () => {
-                    await ReminderService.cancelAll().catch(() => undefined);
-                    await BackgroundTrackingService.stop().catch(() => undefined);
-                    await EmployeeApi.logout(session).catch(() => undefined);
-                    await DeviceBindingService.clearSession();
-                    setSession(null);
-                  }}
-                />
+                session.role === 'OWNER' ? (
+                  <OwnerAppScreen
+                    session={session}
+                    onLogout={async () => {
+                      await EmployeeApi.logout(session).catch(() => undefined);
+                      await DeviceBindingService.clearSession();
+                      setSession(null);
+                    }}
+                  />
+                ) : (
+                  <DutyDashboardScreen
+                    session={session}
+                    deviceInfo={deviceInfo}
+                    onShiftStatus={(onDuty) => {
+                      onDutyRef.current = onDuty;
+                    }}
+                    onLogout={async () => {
+                      await ReminderService.cancelAll().catch(() => undefined);
+                      await BackgroundTrackingService.stop().catch(() => undefined);
+                      await EmployeeApi.logout(session).catch(() => undefined);
+                      await DeviceBindingService.clearSession();
+                      setSession(null);
+                    }}
+                  />
+                )
               ) : (
                 <LoginScreen onLoginSuccess={(user) => setSession(user)} deviceInfo={deviceInfo} />
               )}
