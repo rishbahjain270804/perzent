@@ -17,6 +17,7 @@ import {
   Receipt,
   Route,
   Settings,
+  Siren,
   Smartphone,
   Sun,
   Users,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, errorMessage, ApiError, type SessionInfo } from '@/lib/client';
 import { ErrorBanner } from '@/components/ErrorBanner';
+import { SosBanner } from '@/components/SosBanner';
 
 type Theme = 'light' | 'dark';
 
@@ -39,6 +41,7 @@ const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem('${THEME_K
 const NAV_ITEMS = [
   { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Live Map', href: '/dashboard/live-map', icon: MapPin },
+  { name: 'SOS Alerts', href: '/dashboard/sos', icon: Siren },
   { name: 'Routes', href: '/dashboard/routes', icon: Route },
   { name: 'Attendance', href: '/dashboard/attendance', icon: CalendarCheck },
   { name: 'Timesheets', href: '/dashboard/timesheets', icon: FileSpreadsheet },
@@ -285,7 +288,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </button>
             </header>
 
-            <main className="dashboard-content flex-1 p-3 md:p-5 overflow-y-auto pb-20 md:pb-5">{children}</main>
+            <main className="dashboard-content flex-1 p-3 md:p-5 overflow-y-auto pb-20 md:pb-5"><SosBanner role={session?.role} />{children}</main>
           </div>
 
           {/* ─── Mobile Bottom Tab Bar: 4 items + More ─── */}

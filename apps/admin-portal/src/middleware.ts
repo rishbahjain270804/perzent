@@ -2,10 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 
 /* ────────────────────────────────────────────────
  *  PRE-LAUNCH MODE
- *  Set to `true` to lock ALL public pages to /coming-soon.
- *  When you're ready to launch, flip this to `false`.
+ *  While enabled, marketing pages redirect to /coming-soon. Auth, dashboard, kiosk,
+ *  the Play-declared legal pages and the APK download stay reachable — locking those
+ *  breaks logins for testers and the privacy/account-deletion URLs filed with Google.
+ *  Disable by setting NEXT_PUBLIC_PRE_LAUNCH=false (no code change needed).
  * ──────────────────────────────────────────────── */
-const PRE_LAUNCH_MODE = true;
+const PRE_LAUNCH_MODE = process.env.NEXT_PUBLIC_PRE_LAUNCH !== 'false';
+
+const PRE_LAUNCH_EXEMPT_PAGES = new Set([
+  '/coming-soon',
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/privacy',
+  '/terms',
+  '/account-deletion',
+  '/support',
+  '/faq',
+  '/download',
+]);
+const PRE_LAUNCH_EXEMPT_PREFIXES = ['/dashboard', '/kiosk', '/operator'];
+
+const STATIC_FILE = /\.(?:png|jpe?g|webp|avif|gif|svg|ico|txt|xml|json|webmanifest|apk|css|js|map|mp4|pdf)$/i;
 
 function configuredOrigins(request: NextRequest) {
   const values = [
@@ -33,27 +52,19 @@ export function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  // Always allow: API routes, static assets, Next.js internals, coming-soon page
   const isPassthrough =
     pathname.startsWith('/api/') ||
     pathname.startsWith('/_next') ||
-    pathname.includes('.') ||
-    pathname === '/coming-soon';
+    STATIC_FILE.test(pathname);
 
-  if (isPassthrough) {
-    const response = request.method === 'OPTIONS'
-      ? new NextResponse(null, { status: 204 })
-      : NextResponse.next();
-    if (origin) addCorsHeaders(response, origin);
-    return response;
-  }
+  const isPreLaunchExempt =
+    PRE_LAUNCH_EXEMPT_PAGES.has(pathname) ||
+    PRE_LAUNCH_EXEMPT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
-  // PRE-LAUNCH: redirect every other page to /coming-soon
-  if (PRE_LAUNCH_MODE) {
+  if (!isPassthrough && PRE_LAUNCH_MODE && !isPreLaunchExempt) {
     return NextResponse.redirect(new URL('/coming-soon', request.url));
   }
 
-  // Normal mode: pass through with CORS
   const response = request.method === 'OPTIONS'
     ? new NextResponse(null, { status: 204 })
     : NextResponse.next();

@@ -742,11 +742,11 @@ export default function DutyDashboardScreen({
           onPress: async () => {
             setSendingSos(true);
             try {
-              const pos = await EmployeeApi.getDevicePosition();
+              const pos = await EmployeeApi.currentPosition();
               await EmployeeApi.triggerSos(session, pos, 'EMERGENCY SOS DISPATCH FROM APP');
               Alert.alert(
                 '🚨 SOS ALERT SENT',
-                'Your employer and manager have been notified with your live GPS location. Stay calm.'
+                "Your live GPS location is now visible to your employer on the Perzent dashboard. If you are in immediate danger, also call local emergency services."
               );
             } catch (error) {
               showActionError('SOS Dispatch Failed', error);

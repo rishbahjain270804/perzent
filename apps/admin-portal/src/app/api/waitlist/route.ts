@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma, Prisma } from '@perzent/database';
 import { z } from 'zod';
+import { clientIp, rateLimit } from '@/lib/rate-limit';
+import { operatorAuthorized } from '@/lib/operator';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,10 +16,18 @@ const WaitlistSchema = z.object({
 /** POST /api/waitlist — Capture early-access interest */
 export async function POST(request: Request) {
   try {
+    const retryAfter = rateLimit(`waitlist:${clientIp(request)}`, 5, 10 * 60_000);
+    if (retryAfter !== null) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again in a few minutes.' },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      );
+    }
+
     const body = WaitlistSchema.parse(await request.json());
     const email = body.email.toLowerCase().trim();
 
-    const entry = await prisma.waitlistEntry.upsert({
+    await prisma.waitlistEntry.upsert({
       where: { email },
       update: {},                          // no-op if already exists
       create: {
@@ -51,12 +61,19 @@ export async function POST(request: Request) {
   }
 }
 
-/** GET /api/waitlist — Fetch total waitlist count and recent leads */
+/**
+ * The lead list is operator data (JSP Coders), not tenant data — same bearer secret as the
+ * operator console: curl -H "Authorization: Bearer $OPERATOR_SECRET" …/api/waitlist
+ */
 export async function GET(request: Request) {
   try {
+    if (!operatorAuthorized(request)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const limit = Math.min(100, Math.max(1, Number(searchParams.get('limit')) || 50));
-    
+
     const [total, entries] = await Promise.all([
       prisma.waitlistEntry.count(),
       prisma.waitlistEntry.findMany({
@@ -74,11 +91,7 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      total,
-      entries,
-    });
+    return NextResponse.json({ success: true, total, entries });
   } catch (error) {
     console.error('Waitlist GET error:', error);
     return NextResponse.json(
