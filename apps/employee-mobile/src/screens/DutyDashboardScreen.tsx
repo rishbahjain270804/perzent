@@ -25,6 +25,7 @@ import { RemoteConfigService } from '../services/RemoteConfigService';
 import { ReminderService } from '../services/ReminderService';
 import { BRAND } from '@perzent/shared-types';
 import { SosButton } from '../components/SosButton';
+import { SideMenu, HamburgerIcon } from '../components/SideMenu';
 
 type ShiftStatus = 'CHECKED_OUT' | 'CHECKED_IN' | 'ON_BREAK';
 type ManagerTab = 'DUTY' | 'ATTENDANCE' | 'TEAM' | 'LEAVE';
@@ -139,6 +140,7 @@ export default function DutyDashboardScreen({
   const [leaveReason, setLeaveReason] = useState('');
   const [submittingLeave, setSubmittingLeave] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   const shiftStatusRef = useRef<ShiftStatus>('CHECKED_OUT');
   const serverOffsetRef = useRef(0);
@@ -811,12 +813,9 @@ export default function DutyDashboardScreen({
         <View style={styles.identity}>
           <Text style={styles.greeting}>Hello,</Text>
           <Text style={styles.name}>{session.full_name}</Text>
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleBadgeText}>{isManager ? 'Manager & Employee' : session.designation || 'Employee'}</Text>
-          </View>
         </View>
-        <TouchableOpacity onPress={handleLogoutPress} style={styles.logoutButton} disabled={busy}>
-          <Text style={styles.logoutText}>Log out</Text>
+        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton} accessibilityLabel="Menu">
+          <HamburgerIcon />
         </TouchableOpacity>
       </View>
 
@@ -1028,45 +1027,7 @@ export default function DutyDashboardScreen({
             </TouchableOpacity>
           </View>
 
-          <View style={styles.helpCard}>
-            <Text style={styles.helpTitle}>Need help?</Text>
-            <Text style={styles.helpText}>Ask your manager first for passwords, device resets and attendance fixes. For app problems, see the FAQ or contact support.</Text>
-            <View style={styles.helpRow}>
-              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(FAQ_URL)}>
-                <Text style={styles.helpChipText}>FAQ</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(SUPPORT_URL)}>
-                <Text style={styles.helpChipText}>Support</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.helpChip} onPress={() => openUrl(`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent(`Perzent app v${AutoUpdateService.getCurrentVersion().version}`)}`)}>
-                <Text style={styles.helpChipText}>Email</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity onPress={() => openUrl(BRAND.developerUrl)}>
-              <Text style={styles.developerLink}>Developed by {BRAND.developerName} · {DEVELOPER_HOST}</Text>
-            </TouchableOpacity>
-          </View>
 
-          {/* App Version & Manual Update Card */}
-          <View style={styles.appVersionCard}>
-            <View style={styles.appVersionInfo}>
-              <Text style={styles.appVersionTitle}>Perzent</Text>
-              <Text style={styles.appVersionSubtitle}>
-                Version {AutoUpdateService.getCurrentVersion().version} (Build #{AutoUpdateService.getCurrentVersion().versionCode})
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.checkUpdateButton, checkingUpdate && styles.buttonDisabled]}
-              onPress={handleManualUpdateCheck}
-              disabled={checkingUpdate}
-            >
-              {checkingUpdate ? (
-                <ActivityIndicator size="small" color="#166534" />
-              ) : (
-                <Text style={styles.checkUpdateButtonText}>Check for Updates</Text>
-              )}
-            </TouchableOpacity>
-          </View>
         </View>
       )}
 
@@ -1519,6 +1480,7 @@ export default function DutyDashboardScreen({
       </Modal>
     </ScrollView>
     <SosButton onSend={handleTriggerSos} disabled={sendingSos} />
+    <SideMenu visible={menuVisible} onClose={() => setMenuVisible(false)} session={session} onLogout={handleLogoutPress} />
     </View>
   );
 }
@@ -1534,6 +1496,7 @@ const styles = StyleSheet.create({
   roleBadge: { backgroundColor: '#E2E8F0', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 2 },
   roleBadgeText: { color: '#334155', fontSize: 11, fontWeight: '700' },
   logoutButton: { paddingVertical: 9, paddingHorizontal: 12 },
+  menuButton: { padding: 8, marginLeft: 4 },
   logoutText: { color: '#475569', fontWeight: '700' },
   tabContainer: {
     flexDirection: 'row',

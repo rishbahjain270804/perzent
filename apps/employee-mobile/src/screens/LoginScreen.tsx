@@ -88,19 +88,12 @@ export default function LoginScreen({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>Work device protection</Text>
-          <Text style={styles.noticeText}>
-            Device integrity and work-session signals are checked securely. Technical details are visible only to authorized management.
-          </Text>
-        </View>
-
         <TouchableOpacity
           style={styles.updateButton}
           onPress={() => AutoUpdateService.manualCheck()}
         >
           <Text style={styles.updateButtonText}>
-            🔄 Check for App Updates • v{AutoUpdateService.getCurrentVersion().version} (Build #{AutoUpdateService.getCurrentVersion().versionCode})
+            Check for updates · v{AutoUpdateService.getCurrentVersion().version}
           </Text>
         </TouchableOpacity>
 
