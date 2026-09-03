@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
+import { Icon } from './Icon';
 
 /**
  * Emergency SOS control designed to be pressed by someone in distress:
@@ -124,7 +125,7 @@ export function SosButton({ onSend, disabled }: { onSend: () => Promise<void>; d
           <ActivityIndicator size="large" color="#FFFFFF" />
         ) : (
           <View style={styles.center}>
-            <Text style={styles.icon}>🚨</Text>
+            <Icon name="alert" size={24} color="#FFFFFF" strokeWidth={2.4} />
             <Text style={styles.label}>{label}</Text>
           </View>
         )}

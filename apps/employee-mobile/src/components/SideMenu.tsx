@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BRAND } from '@perzent/shared-types';
 import { AutoUpdateService } from '../services/AutoUpdateService';
+import { Icon, IconName } from './Icon';
 
 /**
  * Slide-in account menu opened from the dashboard hamburger. Groups everything that used to
@@ -48,14 +49,14 @@ export function SideMenu({
         <View style={styles.topBar}>
           {view !== 'ROOT' ? (
             <TouchableOpacity onPress={() => setView('ROOT')} hitSlop={10} style={styles.backBtn}>
-              <Text style={styles.backArrow}>‹</Text>
+              <Icon name="chevronLeft" size={20} color="#16A34A" />
               <Text style={styles.backText}>Menu</Text>
             </TouchableOpacity>
           ) : (
             <Text style={styles.topTitle}>Account</Text>
           )}
           <TouchableOpacity onPress={close} hitSlop={10}>
-            <Text style={styles.closeX}>✕</Text>
+            <Icon name="close" size={20} color="#64748B" />
           </TouchableOpacity>
         </View>
 
@@ -73,10 +74,10 @@ export function SideMenu({
                 </View>
               </View>
 
-              <MenuRow icon="👤" label="Profile" onPress={() => setView('PROFILE')} />
-              <MenuRow icon="⚙️" label="Settings" onPress={() => setView('SETTINGS')} />
-              <MenuRow icon="❓" label="Help & support" onPress={() => setView('HELP')} />
-              <MenuRow icon="ℹ️" label="About" onPress={() => setView('ABOUT')} />
+              <MenuRow icon="user" label="Profile" onPress={() => setView('PROFILE')} />
+              <MenuRow icon="settings" label="Settings" onPress={() => setView('SETTINGS')} />
+              <MenuRow icon="help" label="Help & support" onPress={() => setView('HELP')} />
+              <MenuRow icon="info" label="About" onPress={() => setView('ABOUT')} />
 
               <TouchableOpacity style={styles.logoutRow} onPress={() => { close(); onLogout(); }}>
                 <Text style={styles.logoutText}>Log out</Text>
@@ -103,9 +104,9 @@ export function SideMenu({
           {view === 'SETTINGS' && (
             <>
               <Text style={styles.sectionTitle}>Settings</Text>
-              <MenuRow icon="⬆️" label="Check for app updates" onPress={() => AutoUpdateService.manualCheck()} />
-              <MenuRow icon="🔔" label="Notification settings" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
-              <MenuRow icon="📍" label="Location & permissions" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
+              <MenuRow icon="download" label="Check for app updates" onPress={() => AutoUpdateService.manualCheck()} />
+              <MenuRow icon="bell" label="Notification settings" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
+              <MenuRow icon="mapPin" label="Location & permissions" sub="Open Android settings" onPress={() => Linking.openSettings().catch(() => undefined)} />
             </>
           )}
 
@@ -115,9 +116,9 @@ export function SideMenu({
               <Text style={styles.hintText}>
                 Ask your manager first for passwords, device resets and attendance fixes. For app problems, use the links below.
               </Text>
-              <MenuRow icon="📋" label="FAQ" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.faqPath}`)} />
-              <MenuRow icon="💬" label="Support" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.supportPath}`)} />
-              <MenuRow icon="✉️" label={BRAND.supportEmail} onPress={() => openUrl(`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent(`${BRAND.productName} app v${version}`)}`)} />
+              <MenuRow icon="fileText" label="FAQ" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.faqPath}`)} />
+              <MenuRow icon="help" label="Support" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.supportPath}`)} />
+              <MenuRow icon="globe" label={BRAND.supportEmail} onPress={() => openUrl(`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent(`${BRAND.productName} app v${version}`)}`)} />
             </>
           )}
 
@@ -129,10 +130,10 @@ export function SideMenu({
                 <Text style={styles.aboutVersion}>Version {version} (build {versionCode})</Text>
                 <Text style={styles.aboutDev}>Developed by {BRAND.developerName}</Text>
               </View>
-              <MenuRow icon="🌐" label="Website" onPress={() => openUrl(BRAND.developerUrl)} />
-              <MenuRow icon="🔒" label="Privacy policy" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.privacyPath}`)} />
-              <MenuRow icon="📄" label="Terms of service" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.termsPath}`)} />
-              <MenuRow icon="🗑️" label="Delete my account" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.accountDeletionPath}`)} />
+              <MenuRow icon="globe" label="Website" onPress={() => openUrl(BRAND.developerUrl)} />
+              <MenuRow icon="lock" label="Privacy policy" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.privacyPath}`)} />
+              <MenuRow icon="fileText" label="Terms of service" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.termsPath}`)} />
+              <MenuRow icon="trash" label="Delete my account" onPress={() => openUrl(`${BRAND.webUrl}${BRAND.accountDeletionPath}`)} />
             </>
           )}
         </ScrollView>
@@ -141,15 +142,15 @@ export function SideMenu({
   );
 }
 
-function MenuRow({ icon, label, sub, onPress }: { icon: string; label: string; sub?: string; onPress: () => void }) {
+function MenuRow({ icon, label, sub, onPress, danger }: { icon: IconName; label: string; sub?: string; onPress: () => void; danger?: boolean }) {
   return (
     <TouchableOpacity style={styles.row} onPress={onPress}>
-      <Text style={styles.rowIcon}>{icon}</Text>
+      <View style={styles.rowIcon}><Icon name={icon} size={20} color={danger ? '#DC2626' : '#334155'} /></View>
       <View style={{ flex: 1 }}>
         <Text style={styles.rowLabel}>{label}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
-      <Text style={styles.rowChevron}>›</Text>
+      <Icon name="chevronRight" size={18} color="#CBD5E1" />
     </TouchableOpacity>
   );
 }
@@ -195,7 +196,7 @@ const styles = StyleSheet.create({
   profileSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  rowIcon: { fontSize: 18, width: 30 },
+  rowIcon: { width: 30, alignItems: 'flex-start', justifyContent: 'center' },
   rowLabel: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
   rowSub: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
   rowChevron: { fontSize: 20, color: '#CBD5E1' },
