@@ -58,6 +58,14 @@ const TABS: Array<{ key: Tab; label: string; icon: IconName }> = [
   { key: 'LEAVES', label: 'Leaves', icon: 'calendar' },
 ];
 
+const fmtDate = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return String(iso).slice(0, 10);
+  }
+};
+
 const statusColor = (m: Member) =>
   m.shift_status === 'CHECKED_IN' ? '#16A34A' : m.shift_status === 'ON_BREAK' ? '#D97706' : '#94A3B8';
 const statusLabel = (m: Member) =>
@@ -252,7 +260,7 @@ export default function OwnerAppScreen({ session, onLogout }: { session: any; on
                     <Text style={styles.name}>{l.user?.full_name || 'Employee'}</Text>
                     <Text style={styles.meta}>{l.leave_type} · {l.total_days} day{l.total_days > 1 ? 's' : ''}</Text>
                   </View>
-                  <Text style={styles.meta}>{l.start_date} → {l.end_date}</Text>
+                  <Text style={styles.meta}>{fmtDate(l.start_date)} → {fmtDate(l.end_date)}</Text>
                 </View>
                 {!!l.reason && <Text style={styles.reason}>{l.reason}</Text>}
                 <View style={styles.actions}>
