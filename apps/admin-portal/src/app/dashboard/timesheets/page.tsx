@@ -1,22 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { FileSpreadsheet, Download, RefreshCw, Clock } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FileSpreadsheet, Download, RefreshCw } from 'lucide-react';
 import { apiFetch, errorMessage, todayInTimezone, shiftDate } from '@/lib/client';
 import {
   PageHeader,
-  StatCard,
   EmptyState,
   ErrorBanner,
   LoadingRows,
-  inputClass,
-  labelClass,
   btnPrimary,
   iconBtn,
   errorText,
   tableHeadRow,
   tableRow,
 } from '@/components';
+import { DateRangeBar, SortHeader, useSort, sortRows } from '@/components/DashboardTools';
 
 interface TimesheetRow {
   id: string;
@@ -33,6 +31,8 @@ interface TimesheetRow {
   needs_review?: boolean;
   review_reason?: string | null;
 }
+
+type SortKey = 'work_date' | 'user_name' | 'net_hours' | 'overtime_hours';
 
 const ReviewBadge = ({ row }: { row: { needs_review?: boolean; review_reason?: string | null } }) =>
   row.needs_review ? (
@@ -64,8 +64,10 @@ export default function TimesheetsPage() {
   const [error, setError] = useState('');
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [userFilter, setUserFilter] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
   const [startDate, setStartDate] = useState(() => shiftDate(todayInTimezone(), -14));
   const [endDate, setEndDate] = useState(() => todayInTimezone());
+  const { sort, toggle } = useSort<SortKey>({ key: 'work_date', dir: 'desc' });
 
   const rangeError = startDate && endDate && startDate > endDate ? 'Start date must be on or before the end date.' : '';
 
@@ -105,14 +107,31 @@ export default function TimesheetsPage() {
       .catch(() => setEmployees([]));
   }, []);
 
+  const departments = useMemo(() => {
+    const set = new Set<string>();
+    timesheets.forEach((r) => set.add(r.department || 'Unassigned'));
+    return [...set].sort();
+  }, [timesheets]);
+
+  const visible = useMemo(() => {
+    const rows = deptFilter ? timesheets.filter((r) => (r.department || 'Unassigned') === deptFilter) : timesheets;
+    return sortRows(rows, sort.key, sort.dir, {
+      work_date: (r) => r.work_date,
+      user_name: (r) => r.user_name || '',
+      net_hours: (r) => r.net_hours,
+      overtime_hours: (r) => r.overtime_hours,
+    });
+  }, [timesheets, deptFilter, sort]);
+
+  const shownNet = useMemo(() => visible.reduce((s, r) => s + r.net_hours, 0), [visible]);
+  const shownOt = useMemo(() => visible.reduce((s, r) => s + r.overtime_hours, 0), [visible]);
+
   const handleExportCsv = () => {
     if (rangeError) return;
     const params = buildQuery();
     params.set('format', 'csv');
     window.location.href = `/api/timesheets?${params.toString()}`;
   };
-
-  const today = todayInTimezone();
 
   return (
     <div className="space-y-3 md:space-y-4 max-w-7xl mx-auto">
@@ -133,38 +152,35 @@ export default function TimesheetsPage() {
 
       <ErrorBanner message={error} onRetry={fetchTimesheets} retrying={loading} />
 
-      <div className="dashboard-card rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-        <div>
-          <label htmlFor="start_date" className={labelClass}>From</label>
-          <input id="start_date" type="date" value={startDate} max={today} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
-        </div>
-        <div>
-          <label htmlFor="end_date" className={labelClass}>To</label>
-          <input id="end_date" type="date" value={endDate} min={startDate} max={today} onChange={(e) => setEndDate(e.target.value)} className={inputClass} />
-        </div>
-        <div className="col-span-2">
-          <label htmlFor="ts_employee" className={labelClass}>Employee</label>
-          <select id="ts_employee" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className={inputClass}>
-            <option value="">All employees</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>{emp.full_name}</option>
-            ))}
+      <DateRangeBar from={startDate} to={endDate} onChange={(f, t) => { setStartDate(f); setEndDate(t); }} />
+      {rangeError && <p role="alert" className={errorText}>{rangeError}</p>}
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} className="px-2 py-1 rounded border border-slate-700 bg-slate-900 text-white text-[11px] focus:outline-none focus:border-[#16A34A]">
+          <option value="">All employees</option>
+          {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+        </select>
+        {departments.length > 1 && (
+          <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="px-2 py-1 rounded border border-slate-700 bg-slate-900 text-white text-[11px] focus:outline-none focus:border-[#16A34A]">
+            <option value="">All departments</option>
+            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
-        </div>
-        {rangeError && <p role="alert" className={`${errorText} col-span-full`}>{rangeError}</p>}
+        )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <StatCard label="Shifts" value={meta.total_records} icon={FileSpreadsheet} />
-        <StatCard label="Net hours" value={meta.total_net_hours} icon={Clock} tone="success" />
-        <StatCard label="Overtime" value={meta.total_overtime_hours} tone={meta.total_overtime_hours > 0 ? 'warning' : 'default'} hint={`beyond ${meta.standard_daily_hours} h/day`} />
+      {/* Compact summary strip */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#6B7280] px-1">
+        <span><strong className="dashboard-strong tabular-nums">{visible.length}</strong> shifts</span>
+        <span><strong className="text-emerald-400 tabular-nums">{shownNet.toFixed(1)}h</strong> net</span>
+        <span><strong className={shownOt > 0 ? 'text-amber-400' : 'dashboard-strong'}>{shownOt > 0 ? `+${shownOt.toFixed(1)}h` : '0h'}</strong> overtime</span>
+        <span className="ml-auto">{startDate} → {endDate}</span>
       </div>
 
       {/* Mobile */}
       <div className="md:hidden space-y-2">
         {loading && <div className="dashboard-card rounded-lg"><LoadingRows rows={3} /></div>}
         {!loading &&
-          timesheets.map((row) => (
+          visible.map((row) => (
             <div key={row.id} className="dashboard-card rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -181,41 +197,37 @@ export default function TimesheetsPage() {
               </div>
             </div>
           ))}
-        {!loading && timesheets.length === 0 && !error && (
+        {!loading && visible.length === 0 && !error && (
           <div className="dashboard-card rounded-lg">
-            <EmptyState icon={FileSpreadsheet} title="No timesheet rows" description="Nothing recorded for this range. Widen the dates or pick another employee." compact />
+            <EmptyState icon={FileSpreadsheet} title="No timesheet rows" description="Nothing recorded for this range. Widen the dates or clear a filter." compact />
           </div>
         )}
       </div>
 
       {/* Desktop */}
       <div className="hidden md:block dashboard-card rounded-lg overflow-hidden">
-        <div className="p-3 border-b border-slate-800/60 flex items-center justify-between">
-          <span className="font-semibold text-xs dashboard-strong">Timesheet rows</span>
-          <span className="text-[11px] text-slate-400">{startDate} → {endDate}</span>
-        </div>
         {loading ? (
           <LoadingRows rows={5} />
-        ) : timesheets.length === 0 ? (
-          !error && <EmptyState icon={FileSpreadsheet} title="No timesheet rows" description="Nothing recorded for this range. Widen the dates or pick another employee." />
+        ) : visible.length === 0 ? (
+          !error && <EmptyState icon={FileSpreadsheet} title="No timesheet rows" description="Nothing recorded for this range. Widen the dates or clear a filter." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className={tableHeadRow}>
-                  <th className="p-3">Employee</th>
-                  <th className="p-3">Date</th>
+                  <SortHeader label="Employee" sortKey="user_name" sort={sort} onToggle={toggle} />
+                  <SortHeader label="Date" sortKey="work_date" sort={sort} onToggle={toggle} />
                   <th className="p-3">Department</th>
-                  <th className="p-3">Gross</th>
-                  <th className="p-3">Break</th>
-                  <th className="p-3">Net</th>
-                  <th className="p-3">Regular</th>
-                  <th className="p-3 text-amber-400">Overtime</th>
+                  <th className="p-3 text-right">Gross</th>
+                  <th className="p-3 text-right">Break</th>
+                  <SortHeader label="Net" sortKey="net_hours" sort={sort} onToggle={toggle} align="right" />
+                  <th className="p-3 text-right">Regular</th>
+                  <SortHeader label="Overtime" sortKey="overtime_hours" sort={sort} onToggle={toggle} align="right" />
                   <th className="p-3">Site</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
-                {timesheets.map((row) => (
+                {visible.map((row) => (
                   <tr key={row.id} className={tableRow}>
                     <td className="p-3 font-medium dashboard-strong">
                       <p className="leading-tight">{row.user_name}</p>
@@ -223,11 +235,11 @@ export default function TimesheetsPage() {
                     </td>
                     <td className="p-3 text-slate-300 font-mono"><span className="flex items-center gap-1.5">{row.work_date}<ReviewBadge row={row} /></span></td>
                     <td className="p-3 text-slate-400">{row.department || '—'}</td>
-                    <td className="p-3 text-slate-300">{row.gross_hours}h</td>
-                    <td className="p-3 text-slate-400">{row.break_hours}h</td>
-                    <td className="p-3 font-bold text-emerald-400">{row.net_hours}h</td>
-                    <td className="p-3 text-slate-300">{row.regular_hours}h</td>
-                    <td className="p-3 font-semibold text-amber-400">{row.overtime_hours > 0 ? `+${row.overtime_hours}h` : '0h'}</td>
+                    <td className="p-3 text-right text-slate-300">{row.gross_hours}h</td>
+                    <td className="p-3 text-right text-slate-400">{row.break_hours}h</td>
+                    <td className="p-3 text-right font-bold text-emerald-400">{row.net_hours}h</td>
+                    <td className="p-3 text-right text-slate-300">{row.regular_hours}h</td>
+                    <td className="p-3 text-right font-semibold text-amber-400">{row.overtime_hours > 0 ? `+${row.overtime_hours}h` : '0h'}</td>
                     <td className="p-3 text-slate-400 truncate max-w-xs">{row.site_name || 'Field'}</td>
                   </tr>
                 ))}

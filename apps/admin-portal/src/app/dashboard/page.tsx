@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Users, MapPin, Coffee, AlertTriangle, ArrowUpRight, Battery, RefreshCw, WifiOff } from 'lucide-react';
+import { Users, MapPin, AlertTriangle, ArrowUpRight, Battery, RefreshCw, WifiOff, Smartphone } from 'lucide-react';
 import { apiFetch, errorMessage, isAbortError, formatTime, todayInTimezone, relativeTime } from '@/lib/client';
 import {
   PageHeader,
-  StatCard,
   StatusBadge,
   ErrorBanner,
   EmptyState,
@@ -72,7 +71,6 @@ export default function DashboardOverviewPage() {
   const totalEmployees = team.length;
   const checkedIn = team.filter((m) => m.shift_status === 'CHECKED_IN').length;
   const onBreak = team.filter((m) => m.shift_status === 'ON_BREAK').length;
-  const tamperAlerts = team.filter((m) => m.has_tamper_alert).length;
   const disconnected = team.filter((m) => isOnShift(m) && freshnessOf(m, now) === 'disconnected').length;
   // A disconnected on-shift member also carries has_tamper_alert, so count members, not flags.
   const alertCount = team.filter((m) => m.has_tamper_alert || (isOnShift(m) && freshnessOf(m, now) === 'disconnected')).length;
@@ -126,17 +124,19 @@ export default function DashboardOverviewPage() {
 
       <ErrorBanner message={error} onRetry={() => fetchLiveTeam(true)} retrying={refreshing} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <StatCard label="Staff" value={totalEmployees} icon={Users} />
-        <StatCard label="On duty" value={checkedIn} icon={MapPin} tone="success" />
-        <StatCard label="On break" value={onBreak} icon={Coffee} tone="warning" />
-        <StatCard
-          label="Alerts"
-          value={alertCount}
-          icon={AlertTriangle}
-          tone={alertCount > 0 ? 'danger' : 'default'}
-          hint={disconnected > 0 ? `${disconnected} GPS/Net lost` : undefined}
-        />
+      {/* Compact live summary (replaces the stat-card row) */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6B7280] px-1">
+        <span><strong className="dashboard-strong tabular-nums">{totalEmployees}</strong> staff</span>
+        <span><strong className="text-emerald-400 tabular-nums">{checkedIn}</strong> on duty</span>
+        <span><strong className="text-amber-400 tabular-nums">{onBreak}</strong> on break</span>
+        {alertCount > 0 ? (
+          <Link href="/dashboard/sos" className="flex items-center gap-1 text-red-400 hover:underline">
+            <AlertTriangle className="w-3 h-3" /><strong className="tabular-nums">{alertCount}</strong> alert{alertCount > 1 ? 's' : ''}
+            {disconnected > 0 ? ` · ${disconnected} GPS/Net lost` : ''}
+          </Link>
+        ) : (
+          <span className="flex items-center gap-1"><strong className="text-emerald-400 tabular-nums">0</strong> alerts</span>
+        )}
       </div>
 
       {/* ─── Mobile Card List ─── */}
@@ -219,10 +219,7 @@ export default function DashboardOverviewPage() {
                 <tr className={tableHeadRow}>
                   <th className="px-3 py-2">Employee</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Signal</th>
                   <th className="px-3 py-2">Location</th>
-                  <th className="px-3 py-2">Battery</th>
-                  <th className="px-3 py-2">Device</th>
                   <th className="px-3 py-2 text-right">Action</th>
                 </tr>
               </thead>
@@ -243,37 +240,31 @@ export default function DashboardOverviewPage() {
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <StatusBadge status={m.shift_status} label={statusLabel(m)} />
-                        {renderAlert(m)}
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <StatusBadge status={m.shift_status} label={statusLabel(m)} />
+                          {renderFreshness(m)}
+                          {freshness === 'disconnected' && (
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                              <WifiOff className="w-3 h-3" /> last ping {relativeTime(m.current_location?.last_ping_at, now)}
+                            </span>
+                          )}
+                          {renderAlert(m)}
+                        </div>
                       </td>
-                      <td className="px-3 py-2">
-                        {freshness === 'idle' ? (
-                          <span className="text-[10px] text-slate-500">—</span>
-                        ) : (
-                          <div className="flex flex-col gap-0.5">
-                            {renderFreshness(m)}
-                            {freshness === 'disconnected' && (
-                              <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                                <WifiOff className="w-3 h-3" /> last ping {relativeTime(m.current_location?.last_ping_at, now)}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 max-w-[200px]">
+                      <td className="px-3 py-2 max-w-[240px]">
                         <p className="truncate text-slate-300 text-[11px]" title={m.current_location?.address_name}>
                           {m.current_location?.address_name || (isOnShift(m) ? 'Waiting for GPS' : 'No shift today')}
                         </p>
-                        {(m.dwell_minutes ?? 0) > 0 && isOnShift(m) && (
-                          <p className="text-[10px] text-[#6B7280]">{m.dwell_minutes} min at this spot</p>
-                        )}
+                        <p className="text-[10px] text-[#6B7280] flex items-center gap-2 mt-0.5">
+                          {(m.dwell_minutes ?? 0) > 0 && isOnShift(m) && <span>{m.dwell_minutes} min here</span>}
+                          {m.battery_level != null && (
+                            <span className="flex items-center gap-0.5"><Battery className="w-3 h-3" />{m.battery_level}%</span>
+                          )}
+                          {m.device_model && (
+                            <span className="flex items-center gap-0.5 truncate"><Smartphone className="w-3 h-3" />{m.device_model}</span>
+                          )}
+                        </p>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className="font-bold text-emerald-400 tabular-nums text-[11px]">
-                          {m.battery_level == null ? '—' : `${m.battery_level}%`}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-slate-400">{m.device_model || '—'}</td>
                       <td className="px-3 py-2 text-right">
                         <Link href={trailHref(m)} className={btnGhost}>Trail</Link>
                       </td>
